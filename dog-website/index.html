@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dog Carousel</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <h1>Dog Gallery</h1>
+      <p class="subtitle">
+        Click on a dog picture to reveal its scientific name, weight, and diet.
+      </p>
+
+      <section class="carousel" aria-label="Dog carousel">
+        <button class="nav-btn prev" aria-label="Previous dog">&#10094;</button>
+
+        <article class="slide active" data-index="0">
+          <img
+            class="dog-image"
+            src="images/dog1.jpg"
+            alt="Golden retriever dog"
+          />
+          <div class="dog-info">
+            <h2>Golden Retriever</h2>
+            <p><strong>Scientific name:</strong> Canis lupus familiaris</p>
+            <p><strong>Average weight:</strong> 25-34 kg</p>
+            <p><strong>Diet:</strong> Omnivore (protein-rich domestic diet)</p>
+          </div>
+        </article>
+
+        <article class="slide" data-index="1">
+          <img
+            class="dog-image"
+            src="images/dog2.jpg"
+            alt="French bulldog dog"
+          />
+          <div class="dog-info">
+            <h2>French Bulldog</h2>
+            <p><strong>Scientific name:</strong> Canis lupus familiaris</p>
+            <p><strong>Average weight:</strong> 8-14 kg</p>
+            <p><strong>Diet:</strong> Omnivore (balanced kibble or wet food)</p>
+          </div>
+        </article>
+
+        <article class="slide" data-index="2">
+          <img
+            class="dog-image"
+            src="images/dog3.jpg"
+            alt="Beagle dog"
+          />
+          <div class="dog-info">
+            <h2>Beagle</h2>
+            <p><strong>Scientific name:</strong> Canis lupus familiaris</p>
+            <p><strong>Average weight:</strong> 9-14 kg</p>
+            <p><strong>Diet:</strong> Omnivore (high-protein and fiber diet)</p>
+          </div>
+        </article>
+
+        <button class="nav-btn next" aria-label="Next dog">&#10095;</button>
+
+        <div class="dots" aria-label="Carousel position">
+          <button class="dot active" data-index="0" aria-label="Go to dog 1"></button>
+          <button class="dot" data-index="1" aria-label="Go to dog 2"></button>
+          <button class="dot" data-index="2" aria-label="Go to dog 3"></button>
+        </div>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>

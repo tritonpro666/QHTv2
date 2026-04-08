@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Play, ShoppingBag, Settings, BookOpen, LogOut, Coins, Bot, Gift } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Play, ShoppingBag, Settings, BookOpen, LogOut, Coins, Bot, Gift, Search, Bell, MessageCircle, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import { useTranslation } from '../utils/translations';
@@ -9,6 +9,10 @@ import TutorialModal from '../components/TutorialModal';
 import SettingsModal from '../components/SettingsModal';
 import StoreModal from '../components/StoreModal';
 import ProfileModal from '../components/ProfileModal';
+import UserProfileModal from '../components/UserProfileModal';
+import UserNotificationsModal from '../components/UserNotificationsModal';
+import SocialChatModal from '../components/SocialChatModal';
+import FriendsListModal from '../components/FriendsListModal';
 import SofoChatModal from '../components/SofoChatModal';
 import DailyRewardModal from '../components/DailyRewardModal';
 import GameModeModal from '../components/GameModeModal';
@@ -16,15 +20,35 @@ import OnlineLobbyModal from '../components/OnlineLobbyModal';
 
 export default function MainMenu() {
     const navigate = useNavigate();
-    const { user, logout, setGameMode } = useGameStore();
+    const { 
+        user, logout, setGameMode, searchUsers, chats, 
+        getChatIdForDirectMessage, subscribeToProfileUpdates, fetchProfiles 
+    } = useGameStore();
     const { t } = useTranslation();
 
     const [showTutorial, setShowTutorial] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [showStore, setShowStore] = useState(false);
-    const [showProfile, setShowProfile] = useState(false);
+    const [showOwnProfile, setShowOwnProfile] = useState(false);
     const [showSofoChat, setShowSofoChat] = useState(false);
     const [showDaily, setShowDaily] = useState(false);
+
+    // Social State
+    const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState([]);
+    const searchRef = useRef(null);
+    
+    const [showNotifications, setShowNotifications] = useState(false);
+    const notificationsRef = useRef(null);
+
+    const [showSocialChat, setShowSocialChat] = useState(false);
+    const [initialChatId, setInitialChatId] = useState(null);
+    const [showFriendsList, setShowFriendsList] = useState(false);
+    
+    // User Profile Action
+    const [selectedUser, setSelectedUser] = useState(null);
+    const [showUserProfile, setShowUserProfile] = useState(false);
 
     // New Modals
     const [showGameMode, setShowGameMode] = useState(false);
@@ -45,31 +69,165 @@ export default function MainMenu() {
         }
     };
 
+    // Real-time Profile Subscription
+    useEffect(() => {
+        const unsubscribe = subscribeToProfileUpdates();
+        return () => {
+            if (unsubscribe) unsubscribe();
+        };
+    }, [subscribeToProfileUpdates]);
+
+    // Fetch friend and requester profiles
+    useEffect(() => {
+        const emailsToFetch = [
+            ...(user?.friends || []),
+            ...(user?.friendRequests || [])
+        ];
+        if (emailsToFetch.length > 0) {
+            fetchProfiles(emailsToFetch);
+        }
+    }, [user?.friends, user?.friendRequests, fetchProfiles]);
+
+    // Search Effects
+    useEffect(() => {
+        const performSearch = async () => {
+            if (searchQuery.trim().length > 0) {
+                const results = await searchUsers(searchQuery);
+                setSearchResults(results);
+            } else {
+                setSearchResults([]);
+            }
+        };
+        performSearch();
+    }, [searchQuery, searchUsers]);
+
+    // Click outside handler for search and notifications
+    useEffect(() => {
+        function handleClickOutside(event) {
+            if (searchRef.current && !searchRef.current.contains(event.target)) {
+                setIsSearchExpanded(false);
+            }
+            if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
+                setShowNotifications(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const handleUserClick = (targetUser) => {
+        setSelectedUser(targetUser);
+        setShowUserProfile(true);
+        setIsSearchExpanded(false);
+        setSearchQuery("");
+    };
+
+    const handleOpenChat = (friendEmail) => {
+        const chatId = getChatIdForDirectMessage(user?.email, friendEmail);
+        setInitialChatId(chatId);
+        setShowSocialChat(true);
+    };
+
+    const handleOpenProfile = (friend) => {
+        setSelectedUser(friend);
+        setShowUserProfile(true);
+    };
+
+    // Calculate total unread messages
+    const totalUnreadMessages = Object.values(chats || {}).reduce((count, chat) => {
+        if (!chat || !chat.messages || !Array.isArray(chat.messages) || chat.messages.length === 0) return count;
+        
+        // Find the chat ID (could be group or DM)
+        const chatId = Object.keys(chats).find(id => chats[id] === chat);
+        if (!chatId) return count;
+
+        const lastMsg = chat.messages[chat.messages.length - 1];
+        if (lastMsg && lastMsg.sender_email !== user?.email) {
+            const lastReadTimestamp = (user?.lastReadChats || {})[chatId] || 0;
+            if (new Date(lastMsg.timestamp).getTime() > lastReadTimestamp) {
+                return count + 1;
+            }
+        }
+        return count;
+    }, 0);
+
     if (!user) return null;
 
     return (
         <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
 
             {/* Header / Top Bar */}
-            <header className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm mb-8">
-                <div className="flex items-center gap-4">
+            <header className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm mb-8 relative z-30">
+                <div className="flex items-center gap-2 sm:gap-4">
+                    {/* User Profile Hook */}
                     <div
-                        className="flex items-center gap-4 cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors"
-                        onClick={() => setShowProfile(true)}
+                        className="flex items-center gap-2 sm:gap-4 cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors"
+                        onClick={() => setShowOwnProfile(true)}
                     >
-                        <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-200 border-2 border-sofofa-blue relative">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden bg-gray-200 border-2 border-sofofa-blue relative shrink-0">
                             <img src={user.avatar} alt="Avatar" className="w-full h-full object-cover" />
                             {/* Show equipped shirt if any */}
                             {user.equippedItems?.shirt && (
-                                <img src={user.equippedItems.shirt.icon} className="absolute bottom-0 right-0 w-6 h-6 rounded-full border bg-white" alt="shirt" />
+                                <img src={user.equippedItems.shirt.icon} className="absolute bottom-0 right-0 w-4 h-4 sm:w-6 sm:h-6 rounded-full border bg-white" alt="shirt" />
                             )}
                         </div>
-                        <div>
+                        <div className="hidden sm:block">
                             <h1 className="font-bold text-lg text-sofofa-dark">{user.name}</h1>
                             <div className="flex items-center gap-1 text-sofofa-accent font-bold text-sm">
                                 <Coins size={16} /> <span>{user.points} pts</span>
                             </div>
                         </div>
+                    </div>
+
+                    {/* Social Expandable Search */}
+                    <div className="relative" ref={searchRef}>
+                        <motion.div
+                            animate={{ width: isSearchExpanded ? (window.innerWidth < 640 ? 150 : 250) : 40 }}
+                            className={`flex items-center bg-gray-100 rounded-full h-10 overflow-hidden ${isSearchExpanded ? 'px-2 border border-blue-200 shadow-sm' : 'justify-center cursor-pointer hover:bg-gray-200'}`}
+                            onClick={() => !isSearchExpanded && setIsSearchExpanded(true)}
+                        >
+                            <Search size={18} className={`shrink-0 ${isSearchExpanded ? 'text-gray-400 mr-2' : 'text-gray-600'}`} />
+                            {isSearchExpanded && (
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    placeholder="Buscar amigo..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="bg-transparent border-none outline-none text-sm w-full"
+                                />
+                            )}
+                        </motion.div>
+                        
+                        {/* Search Results Dropdown */}
+                        <AnimatePresence>
+                            {isSearchExpanded && searchResults.length > 0 && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: 10 }}
+                                    className="absolute top-12 left-0 w-64 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden"
+                                >
+                                    <ul>
+                                        {searchResults.map((resUser) => (
+                                            <li key={resUser.email}>
+                                                <button 
+                                                    onClick={() => handleUserClick(resUser)}
+                                                    className="w-full p-3 flex items-center gap-3 hover:bg-gray-50 transition-colors border-b border-gray-50/50 text-left"
+                                                >
+                                                    <div className="w-8 h-8 rounded-full overflow-hidden bg-gray-200 shrink-0">
+                                                        <img src={resUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-bold text-sm text-gray-800 truncate">{resUser.name}</p>
+                                                    </div>
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
 
                     {/* Daily Reward Button (Small) */}
@@ -89,12 +247,50 @@ export default function MainMenu() {
                     </button>
                 </div>
 
-                <button
-                    onClick={() => { logout(); navigate('/'); }}
-                    className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
-                >
-                    <LogOut size={20} />
-                </button>
+                <div className="flex items-center gap-2">
+                    {/* Friends List Button */}
+                    <button
+                        onClick={() => setShowFriendsList(true)}
+                        className="p-2 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-full transition-colors"
+                        title="Ver Amigos"
+                    >
+                        <Users size={22} />
+                    </button>
+
+                    {/* Social Chat Button */}
+                    <button
+                        onClick={() => { setInitialChatId(null); setShowSocialChat(true); }}
+                        className="relative p-2 hover:bg-blue-50 text-gray-400 hover:text-sofofa-blue rounded-full transition-colors"
+                        title="Chat"
+                    >
+                        <MessageCircle size={22} />
+                        {totalUnreadMessages > 0 && (
+                            <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+                        )}
+                    </button>
+
+                    {/* Notifications Button */}
+                    <div className="relative" ref={notificationsRef}>
+                        <button
+                            onClick={() => setShowNotifications(!showNotifications)}
+                            className="relative p-2 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded-full transition-colors"
+                        >
+                            <Bell size={22} />
+                            {(user?.friendRequests?.length > 0) && (
+                                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+                            )}
+                        </button>
+                        <UserNotificationsModal isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
+                    </div>
+
+                    {/* Logout */}
+                    <button
+                        onClick={() => { logout(); navigate('/'); }}
+                        className="p-2 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-full transition-colors ml-2"
+                    >
+                        <LogOut size={20} />
+                    </button>
+                </div>
             </header>
 
             {/* Main Grid */}
@@ -181,7 +377,15 @@ export default function MainMenu() {
             <TutorialModal isOpen={showTutorial} onClose={() => setShowTutorial(false)} />
             <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
             <StoreModal isOpen={showStore} onClose={() => setShowStore(false)} />
-            <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
+            <ProfileModal isOpen={showOwnProfile} onClose={() => setShowOwnProfile(false)} />
+            <UserProfileModal isOpen={showUserProfile} onClose={() => setShowUserProfile(false)} targetUser={selectedUser} />
+            <FriendsListModal 
+                isOpen={showFriendsList} 
+                onClose={() => setShowFriendsList(false)} 
+                onOpenChat={handleOpenChat}
+                onOpenProfile={handleOpenProfile}
+            />
+            <SocialChatModal isOpen={showSocialChat} onClose={() => setShowSocialChat(false)} initialChatId={initialChatId} />
             <SofoChatModal isOpen={showSofoChat} onClose={() => setShowSofoChat(false)} />
             <DailyRewardModal isOpen={showDaily} onClose={() => setShowDaily(false)} />
 

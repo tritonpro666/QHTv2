@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, User, Check, Edit2, Upload, Briefcase } from 'lucide-react';
+import { X, User, Check, Edit2, Upload, Briefcase, FileText } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
+import { containsProfanity } from '../utils/profanityFilter';
 import { useTranslation } from '../utils/translations';
 
 const SPECIALTIES = [
@@ -18,6 +19,10 @@ export default function ProfileModal({ isOpen, onClose }) {
     const [isEditingName, setIsEditingName] = useState(false);
     const [showSpecSelector, setShowSpecSelector] = useState(false);
     const [newName, setNewName] = useState(user?.name || "");
+    const [isEditingDesc, setIsEditingDesc] = useState(false);
+    const [tempDesc, setTempDesc] = useState(user?.description || "");
+    const [descError, setDescError] = useState("");
+    
     const fileInputRef = useRef(null);
 
     if (!isOpen) return null;
@@ -43,6 +48,16 @@ export default function ProfileModal({ isOpen, onClose }) {
     const handleSelectSpecialty = (specId) => {
         updateProfile({ specialty: specId });
         setShowSpecSelector(false);
+    };
+
+    const handleSaveDesc = () => {
+        if (containsProfanity(tempDesc)) {
+            setDescError("La descripción contiene palabras no permitidas.");
+            return;
+        }
+        updateProfile({ description: tempDesc.trim() });
+        setIsEditingDesc(false);
+        setDescError("");
     };
 
     return (
@@ -163,7 +178,42 @@ export default function ProfileModal({ isOpen, onClose }) {
                             </div>
                         </div>
 
-                        <h4 className="font-bold text-gray-500 mb-2 border-b pb-1 mt-4">{t('profile.closet')}</h4>
+                        {/* Description Section */}
+                        <div className="mt-6 bg-gray-50 p-4 rounded-xl border border-gray-100 relative">
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                                    <FileText size={14} /> Sobre mí
+                                </h3>
+                                {!isEditingDesc && (
+                                    <button onClick={() => { setTempDesc(user?.description || ''); setIsEditingDesc(true); }} className="text-gray-400 hover:text-sofofa-blue transition-colors">
+                                        <Edit2 size={14} />
+                                    </button>
+                                )}
+                            </div>
+                            
+                            {isEditingDesc ? (
+                                <div className="flex flex-col gap-2">
+                                    <textarea 
+                                        value={tempDesc}
+                                        onChange={(e) => setTempDesc(e.target.value)}
+                                        maxLength={150}
+                                        className="w-full text-sm p-2 border rounded-lg resize-none min-h-[60px] focus:outline-none focus:ring-2 focus:ring-sofofa-blue bg-white"
+                                        placeholder="Escribe algo sobre ti para que los demás te conozcan..."
+                                    />
+                                    {descError && <p className="text-xs text-red-500 font-bold">{descError}</p>}
+                                    <div className="flex justify-end gap-2 mt-1">
+                                        <button onClick={() => {setIsEditingDesc(false); setDescError("");}} className="text-xs font-bold text-gray-500 hover:text-gray-700 px-3 py-1">Cancelar</button>
+                                        <button onClick={handleSaveDesc} className="text-xs font-bold bg-sofofa-blue text-white px-3 py-1 rounded-full hover:bg-blue-700 transition">Guardar</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-gray-700 italic">
+                                    {user?.description ? `"${user.description}"` : "Aún no has añadido una descripción. ¡Añade una para que los demás te conozcan!"}
+                                </p>
+                            )}
+                        </div>
+
+                        <h4 className="font-bold text-gray-500 mb-2 border-b pb-1 mt-6">{t('profile.closet')}</h4>
 
                         {user.inventory && user.inventory.length > 0 ? (
                             <div className="grid grid-cols-3 gap-2">

@@ -5,6 +5,8 @@ export const ROLES = [
         description: 'Siempre tiene la respuesta correcta y conoce el reglamento de memoria.',
         maxHp: 120,
         maxEnergy: 60,
+        str: 5, int: 15,
+        cutinQuote: '¡SEGÚN EL MANUAL DE CONVIVENCIA, ARTÍCULO 4... QUEDAS FUERA!',
         weakness: 'fire',
         cards: [
             { id: 'matea_1', title: 'Citar RICE', desc: 'Recita el artículo exacto del reglamento para calmar la situación.', damage: 30, cost: 20, riceFactor: 1.0 },
@@ -26,6 +28,8 @@ export const ROLES = [
         description: 'Usa el humor para romper la tensión, aunque a veces se le pasa la mano.',
         maxHp: 110,
         maxEnergy: 55,
+        str: 8, int: 12,
+        cutinQuote: '¡PREPÁRATE PARA EL REMATE FINAL!',
         weakness: 'electric',
         cards: [
             { id: 'gracioso_1', title: 'Chiste Inoportuno', desc: 'Lanza un chiste que hace reír a todos y baja la tensión.', damage: 20, cost: 15, riceFactor: 0.6 },
@@ -46,6 +50,8 @@ export const ROLES = [
         description: 'Experto en tecnología y redes, vive conectado al mundo virtual.',
         maxHp: 100,
         maxEnergy: 70,
+        str: 6, int: 14,
+        cutinQuote: '¡GG EZ! ¡NOCLIP HACK ACTIVATED!',
         weakness: 'water',
         cards: [
             { id: 'rata_1', title: 'Hacker de Casino', desc: 'Consigue comida extra alterando el sistema (digitalmente).', damage: 35, cost: 35, riceFactor: 0.4 },
@@ -66,6 +72,8 @@ export const ROLES = [
         description: 'Todo es contenido para sus historias. La imagen lo es todo.',
         maxHp: 105,
         maxEnergy: 65,
+        str: 7, int: 13,
+        cutinQuote: '¡ESTA FUNA SE VA A HACER VIRAL!',
         weakness: 'wind',
         cards: [
             { id: 'selfie_1', title: 'Story de Denuncia', desc: 'Graba un video mostrando la injusticia para que se haga viral.', damage: 25, cost: 20, riceFactor: 0.7 },
@@ -86,6 +94,8 @@ export const ROLES = [
         description: 'Puede dormir en cualquier lugar. Su calma es imperturbable.',
         maxHp: 140,
         maxEnergy: 50,
+        str: 10, int: 8,
+        cutinQuote: 'Zzz... ah... ¡YA DESPERTÉ!',
         weakness: 'ice',
         cards: [
             { id: 'dormir_1', title: 'Sueño Profundo', desc: 'Ignora el conflicto tan fuerte que los demás se calman.', damage: 10, cost: 10, riceFactor: 0.6 },
@@ -106,6 +116,8 @@ export const ROLES = [
         description: 'Energía pura. Resuelve todo con movimiento y deporte.',
         maxHp: 130,
         maxEnergy: 55,
+        str: 16, int: 4,
+        cutinQuote: '¡ESTO ES POR EL EQUIPO, TOMA!',
         weakness: 'earth',
         cards: [
             { id: 'atleta_1', title: 'Pichanga de Paz', desc: 'Desvía el conflicto hacia un partido de fútbol rápido.', damage: 20, cost: 15, riceFactor: 1.0 },
@@ -127,6 +139,8 @@ export const ROLES = [
         description: 'Tiene el don de la palabra. Puede convencer a cualquiera de cualquier cosa.',
         maxHp: 115,
         maxEnergy: 60,
+        str: 9, int: 15,
+        cutinQuote: '¡TE LO ADVERTÍ POR LAS BUENAS...!',
         weakness: 'water',
         cards: [
             { id: 'habla_1', title: 'Labia de Oro', desc: 'Habla tanto y tan bien que convence al agresor de rendirse.', damage: 40, cost: 35, riceFactor: 1.0 },
@@ -152,22 +166,53 @@ export const SCENARIOS = [
         desc: 'Un estante viejo se cae en medio de la sala. Hay un estudiante atrapado debajo.'
     },
     {
+        id: 'case_2',
+        type: 'CONVIVENCIA',
+        title: 'Alumno Aislado',
+        desc: 'Un alumno se encuentra solo y aislado en un rincón del patio durante el recreo, visiblemente triste.'
+    },
+    {
         id: 'case_3',
         type: 'CONVIVENCIA',
-        title: 'Ciberbullying en el Grupo',
-        desc: 'Alguien filtró fotos vergonzosas de un compañero en el grupo de WhatsApp del curso.'
+        title: 'Sin Grupo',
+        desc: 'Un alumno se queda sin grupo para un trabajo importante y nadie quiere incluirlo.'
     },
     {
         id: 'case_4',
         type: 'CONVIVENCIA',
         title: 'Pelea en el Casino',
         desc: 'Se armó una trifulca masiva por el último plato de comida del día.'
+    }
+];
+
+export const PHONE_CONTACTS = [
+    {
+        id: 'prof_jefe',
+        name: 'Profesor Jefe',
+        role: 'Autoridad',
+        desc: 'Llega a poner orden. Causa DAÑO al rival.',
+        cost: 40,
+        effect: { type: 'damage', amount: 80 },
+        icon: 'grad'
     },
     {
-        id: 'case_5',
-        type: 'CONVIVENCIA',
-        title: 'El Examen Perdido',
-        desc: 'El profesor dice que perdió los exámenes de todos y que hay que repetir la prueba mañana.'
+        id: 'inspector',
+        name: 'Inspector General',
+        role: 'Máxima Autoridad',
+        desc: 'Expulsa al problema. Causa DAÑO MASIVO. (Requiere llamar al Profesor antes)',
+        cost: 60,
+        req: 'prof_jefe',
+        effect: { type: 'damage', amount: 150 },
+        icon: 'school'
+    },
+    {
+        id: 'orientadora',
+        name: 'Orientadora',
+        role: 'Apoyo',
+        desc: 'Recupera 50% de energía a todos.',
+        cost: 30,
+        effect: { type: 'energy', amount: 0.5, target: 'all' },
+        icon: 'heart'
     }
 ];
 
@@ -176,36 +221,48 @@ export const BOSSES = [
         id: 'boss_1',
         type: 'GRAVE',
         title: 'Amenaza Extrema',
-        desc: 'Un estudiante entra a la sala muy alterado, saca un arma y amenaza a quemarropa.',
-        bossName: 'Alumno Resentido',
+        desc: 'Un estudiante saca un arma de fuego y amenaza con disparar a quemarropa.',
+        bossName: 'Alumno Armado',
         image: '/assets/villains/student_resented.png',
-        maxHp: 350,
+        maxHp: 400,
         maxEnergy: 100,
         weakness: 'water',
         resistance: 'fire',
+        dialogues: [
+            "¡Nadie se mueva o disparo!",
+            "¡Estoy harto de que me ignoren!",
+            "¡Esto se acaba ahora!",
+            "¡No traten de detenerme!"
+        ],
         skills: [
-            { name: 'Yo No Fui', type: 'attack', element: 'fire', damage: 15, cost: 20, target: 'single' },
-            { name: 'Perdón Profe', type: 'heal', healAmount: 0.2, cost: 30 },
-            { name: 'No Es Mi Culpa', type: 'buff', stat: 'attack', amount: 1.3, duration: 2, cost: 25 },
-            { name: 'Recarga de Rabia', type: 'energy', energyAmount: 0.4, cost: 0 }
+            { name: 'Disparo al Aire', type: 'attack', element: 'fire', damage: 25, cost: 20, target: 'all', desc: 'Dispara al techo causando pánico general.' },
+            { name: 'Grito Desesperado', type: 'attack', element: 'wind', damage: 15, cost: 15, target: 'all', desc: 'Un grito que aturde y daña a todos.' },
+            { name: 'Amenaza Directa', type: 'attack', element: 'fire', damage: 35, cost: 25, target: 'single', desc: 'Apunta a uno, pero el miedo afecta a todos.' }, // Modified logic to affect all in UI maybe? No, kept single big hit but maybe add splash
+            { name: 'Recarga de Ira', type: 'buff', stat: 'attack', amount: 1.5, duration: 2, cost: 20, target: 'self', desc: 'Se prepara para un ataque devastador.' }
         ]
     },
     {
         id: 'boss_2',
         type: 'GRAVE',
         title: 'Intruso en el Liceo',
-        desc: 'Un desconocido saltó la pandereta y está intentando robar herramientas del taller.',
-        bossName: 'Ladrón de Herramientas',
+        desc: 'Un desconocido saltó la pandereta y amenaza con herramientas robadas.',
+        bossName: 'Ladrón Violento',
         image: '/assets/villains/tool_thief.png',
-        maxHp: 300,
+        maxHp: 350,
         maxEnergy: 100,
         weakness: 'electric',
         resistance: 'earth',
+        dialogues: [
+            "¡Denme todo lo de valor!",
+            "¡No se acerquen o usaré esto!",
+            "¡Solo quiero irme, no me obliguen!",
+            "¡Atrás!"
+        ],
         skills: [
-            { name: 'Lanzar Herramienta', type: 'attack', element: 'earth', damage: 18, cost: 20, target: 'single' },
-            { name: 'Escape Rápido', type: 'heal', healAmount: 0.15, cost: 25 },
-            { name: 'Grito Intimidante', type: 'buff', stat: 'defense', amount: 1.4, duration: 2, cost: 20 },
-            { name: 'Respirar Hondo', type: 'energy', energyAmount: 0.3, cost: 0 }
+            { name: 'Lanzamiento de Llave', type: 'attack', element: 'earth', damage: 20, cost: 15, target: 'all', desc: 'Lanza herramientas a todo el grupo.' },
+            { name: 'Golpe de Martillo', type: 'attack', element: 'earth', damage: 30, cost: 20, target: 'single', desc: 'Un golpe fuerte a quien esté más cerca.' },
+            { name: 'Intimidación', type: 'debuff', stat: 'defense', amount: 0.8, duration: 2, cost: 10, target: 'all', desc: 'Baja la defensa de todos con amenazas.' },
+            { name: 'Escape Frenético', type: 'buff', stat: 'speed', amount: 1.5, duration: 3, cost: 25, target: 'self', desc: 'Se mueve erráticamente, difícil de golpear.' }
         ]
     }
 ];

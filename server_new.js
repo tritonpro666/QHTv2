@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { sofoKnowledge } from "./src/data/sofoKnowledge.js";
 
 dotenv.config();
 
@@ -155,22 +154,12 @@ app.post('/api/evaluate', async (req, res) => {
     }
 });
 
-const SOFO_SYSTEM_PROMPT = `Eres "Sofo", asistente empático de la red de Liceos SOFOFA.
-CONOCIMIENTO DE LICEOS: 
-${sofoKnowledge.map(l => {
-    let info = `- ${l.name} (${l.shortName}): Especialidades [${l.specialties.map(s => s.name).join(', ')}]`;
-    if (l.institutionalInfo) {
-        info += `\n  INFO INSTITUCIONAL: ${JSON.stringify(l.institutionalInfo)}`;
-    }
-    return info;
-}).join('\n')}
-
-INSTRUCCIONES DE COMPORTAMIENTO:
+const SOFO_SYSTEM_PROMPT = `Eres "Sofo", asistente empático de un Liceo Técnico.
+CONOCIMIENTO BASE: 
+- El Liceo ofrece especialidades como: Electricidad, Gastronomía, Administración, Programación, Mecánica, Construcción y Enfermería (TENS).
+- Ayudas a adolescentes con orientación vocacional (especialidades), apoyo emocional y convivencia escolar.
 - Tu tono es cercano, juvenil pero respetuoso ("profe buena onda").
-- **IMPORTANTE: Solo saluda ("¡Hola!", "¡Qué tal!", etc.) al inicio de la conversación. Si el historial muestra que ya estás hablando con el usuario, ve directo al grano de forma amable sin repetir saludos ni presentarte de nuevo.**
-- Si te preguntan por un liceo específico o especialidad de los mencionados, usa tu conocimiento detallado para orientar al alumno.
-- Destaca las ventajas laborales y los objetivos de cada especialidad.
-- Ayudas con orientación vocacional, apoyo emocional y convivencia escolar.
+- Si te preguntan por una especialidad, destaca sus ventajas laborales.
 
 SEGURIDAD CRÍTICA: Si detectas ideación suicida, violencia grave (armas, amenazas), acoso sexual o delitos, responde UNICAMENTE con un JSON:
 {"isCritical":true, "category":"TIPO", "reason":"...", "response":"Respuesta de contención y sugerencia de ayuda profesional"}.
@@ -219,15 +208,10 @@ app.post('/api/chat', async (req, res) => {
         const fullMessage = `INSTRUCCIONES DE SISTEMA:\n${SOFO_SYSTEM_PROMPT}\n\nMENSAJE DEL USUARIO: ${message} ${contextStr}`;
 
         // Preparar historial para Gemini
-        let formattedHistory = (history || []).map(h => ({
+        const formattedHistory = (history || []).map(h => ({
             role: h.role === 'user' ? 'user' : 'model',
             parts: [{ text: h.text }]
         }));
-
-        // SEGURIDAD: Gemini requiere que el historial empiece por 'user'
-        while (formattedHistory.length > 0 && formattedHistory[0].role !== 'user') {
-            formattedHistory.shift();
-        }
 
         const chat = chatModel.startChat({
             history: formattedHistory,

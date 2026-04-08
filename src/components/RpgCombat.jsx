@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, Zap, Shield, Sword, Sparkles, ShoppingBag, Package } from 'lucide-react';
+import { Zap, Sword, Sparkles, ShoppingBag, Package, Phone, Shield, Lock, Heart } from 'lucide-react';
 import { useGameStore } from '../store/gameStore';
-import { ROLES } from '../data/gameData';
+import { ROLES, PHONE_CONTACTS } from '../data/gameData';
 import InventoryModal from './InventoryModal';
 import PrecisionMinigame from './PrecisionMinigame';
+import DiceMinigame from './DiceMinigame';
+import CutIn from './CutIn';
+import MaturityTree from './MaturityTree';
 
 export default function RpgCombat({ boss, onVictory, onDefeat, openShop }) {
     const { network, updatePlayerCombat, updateBossCombat, useSessionItem, chargeSuper, resetSuper } = useGameStore();
@@ -12,15 +15,23 @@ export default function RpgCombat({ boss, onVictory, onDefeat, openShop }) {
     const [combatLog, setCombatLog] = useState([`¡Un ${boss.bossName} salvaje ha aparecido!`]);
     const [isInventoryOpen, setIsInventoryOpen] = useState(false);
     const [showMinigame, setShowMinigame] = useState(false);
+    const [showDiceGame, setShowDiceGame] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
+    const [villainSpeech, setVillainSpeech] = useState(null);
+    const [isPhoneOpen, setIsPhoneOpen] = useState(false);
+    const [calledContacts, setCalledContacts] = useState([]);
+    const [showCutIn, setShowCutIn] = useState(null);
+    const [isMaturityOpen, setIsMaturityOpen] = useState(false);
 
+    // Sync Players & Boss
     const players = network.players.map(p => {
         const roleData = ROLES.find(r => r.id === p.roleId);
         return {
             ...p,
-            roleCards: roleData?.battleCards || []  // Use battleCards for combat
+            roleCards: roleData?.battleCards || []
         };
     });
+    const mainPlayer = players[0];
     const currentBoss = network.boss || { ...boss, hp: boss.maxHp };
     const superCharge = network.superCharge;
 
@@ -28,230 +39,288 @@ export default function RpgCombat({ boss, onVictory, onDefeat, openShop }) {
         if (!network.boss) {
             updateBossCombat({ ...boss, hp: boss.maxHp });
         }
-    }, []);
+    }, [boss]);
+
+    // Villain Speak Helper
+    const villainSay = (text, duration = 3000) => {
+        setVillainSpeech(text);
+        setTimeout(() => setVillainSpeech(null), duration);
+    };
 
     const addLog = (msg) => {
         setCombatLog(prev => [msg, ...prev].slice(0, 5));
     };
 
+    // --- PLAYER ACTIONS ---
+
     const handlePlayerAction = async (playerId, action) => {
         if (combatPhase !== 'PLAYERS_TURN') return;
 
         const player = players.find(p => p.id === playerId);
-        const energyCost = action.cost || 0;
 
-        if (player.energy < energyCost) {
+        if (player.energy < (action.cost || 0)) {
             addLog(`${player.name} no tiene suficiente energía.`);
             return;
         }
 
-        // Handle different card types
         if (action.type === 'attack') {
-            // Show precision minigame for attacks
             setPendingAction({ playerId, action });
             setShowMinigame(true);
+        } else {
+            await executeAction(playerId, action, 1.0, false);
+        }
+    };
+
+    const handleDefend = async () => {
+        if (combatPhase !== 'PLAYERS_TURN') return;
+
+        updatePlayerCombat(0, {
+            isDefending: true,
+            energy: Math.min(mainPlayer.maxEnergy, mainPlayer.energy + 15)
+        });
+        addLog(`🛡️ Te cubres y recuperas energía.`);
+        await advanceTurn(0);
+    };
+
+    const executeAction = async (playerId, action, multiplier = 1.0, isCritical = false) => {
+        const player = players.find(p => p.id === playerId);
+        const { registerActionScore } = useGameStore.getState();
+        const riceFactor = action.riceFactor || 1.0;
+
+        registerActionScore(riceFactor);
+
+        let logMsg = `${player.name} usó ${action.title}!`;
+
+        if (action.type === 'attack') {
+            const isMagic = ['water', 'ice', 'electric', 'fire'].includes(action.element);
+            const statValue = isMagic ? (player.int || 10) : (player.str || 10);
+            let statMultiplier = 1 + ((statValue - 10) * 0.05); // 5% bonus per point above 10
+            
+            const isCriticalLocal = Math.random() < 0.15;
+            if (isCriticalLocal) {
+                statMultiplier *= 1.5;
+                setShowCutIn(player);
+            }
+
+            if (player.unlockedPassives?.includes('bonus_damage')) {
+                statMultiplier *= 1.2;
+            }
+
+            let baseDamage = action.damage || 0;
+            let damage = Math.floor(baseDamage * riceFactor * multiplier * statMultiplier);
+
+            if (currentBoss.weakness === action.element) {
+                damage = Math.floor(damage * 1.5);
+                logMsg += " ¡ES SUPER EFECTIVO! 🔥";
+            } else if (currentBoss.resistance === action.element) {
+                damage = Math.floor(damage * 0.5);
+                logMsg += " ¡Es poco efectivo! ❄️";
+            }
+
+            if (isCriticalLocal) logMsg += " ⚡ ¡GOLPE CRÍTICO! ⚡";
+
+            const newBossHp = Math.max(0, currentBoss.hp - damage);
+            updateBossCombat({ hp: newBossHp });
+
+            const chargeAmount = Math.max(5, Math.floor(damage / 3));
+            chargeSuper(chargeAmount);
+
+            if (newBossHp <= 0) {
+                addLog(`¡${boss.bossName} ha sido derrotado!`);
+                setTimeout(onVictory, 2000);
+                return;
+            }
         } else if (action.type === 'heal') {
-            handleHeal(playerId, action);
-        } else if (action.type === 'buff') {
-            handleBuff(playerId, action);
+            const statMultiplier = 1 + (((player.int || 10) - 10) * 0.08); // 8% bonus per INT point for healing
+            handleHeal(playerId, action, statMultiplier);
         } else if (action.type === 'revive') {
             handleRevive(playerId, action);
         } else if (action.type === 'energy') {
             handleEnergyRestore(playerId, action);
         }
-    };
 
-    const handleMinigameComplete = async (multiplier, isCritical) => {
-        setShowMinigame(false);
-        if (!pendingAction) return;
-
-        const { playerId, action } = pendingAction;
-        const player = players.find(p => p.id === playerId);
-
-        const { registerActionScore } = useGameStore.getState();
-        const riceFactor = action.riceFactor || 1.0;
-        registerActionScore(riceFactor);
-
-        let baseDamage = action.damage || 0;
-        let damage = Math.floor(baseDamage * riceFactor * multiplier);
-
-        addLog(`${player.name} usó ${action.title}!`);
-        if (isCritical) {
-            addLog("⚡ ¡GOLPE CRÍTICO! ⚡");
-        } else if (multiplier >= 1.5) {
-            addLog("✨ ¡Ataque perfecto!");
-        }
-        if (riceFactor >= 0.9) addLog("✨ ¡Excelente aplicación del RICE!");
-
-        // Update Boss HP
-        const newBossHp = Math.max(0, currentBoss.hp - damage);
-        updateBossCombat({ hp: newBossHp });
-
-        // Update Player Energy
+        addLog(logMsg);
         updatePlayerCombat(playerId, { energy: player.energy - action.cost, isDefending: false });
 
-        // Charge Super Power
-        chargeSuper(Math.floor(damage / 5));
+        if (pendingAction) setPendingAction(null);
+        await advanceTurn(playerId);
+    };
 
-        setPendingAction(null);
+    const handleHeal = (playerId, action, statMultiplier = 1) => {
+        const healAmount = (action.healAmount || 0.3) * statMultiplier;
+        const player = players.find(p => p.id === playerId);
+        const hasGroupHeal = player?.unlockedPassives?.includes('group_heal');
+        
+        players.forEach(p => {
+            if (p.hp > 0) {
+                let actualHeal = 0;
+                if (action.target === 'all' || p.id === playerId) {
+                    actualHeal = Math.floor(p.maxHp * healAmount);
+                } else if (hasGroupHeal) {
+                    actualHeal = Math.floor(p.maxHp * healAmount * 0.3); // 30% splash heal
+                }
+                
+                if (actualHeal > 0) {
+                    updatePlayerCombat(p.id, { hp: Math.min(p.maxHp, p.hp + actualHeal) });
+                }
+            }
+        });
+        
+        const logMsg = `${players.find(p => p.id === playerId)?.name} usó ${action.title} y curó puntos de vida. 💚`;
+        addLog(logMsg);
+    };
 
-        if (newBossHp <= 0) {
-            addLog(`¡El ${boss.bossName} ha sido derrotado!`);
-            setTimeout(onVictory, 2000);
+    const handleRevive = (playerId, action) => {
+        const dead = players.find(p => p.hp <= 0);
+        if (dead) {
+            updatePlayerCombat(dead.id, { hp: Math.floor(dead.maxHp * 0.5) });
+            addLog(`¡${dead.name} ha revivido!`);
+        }
+    };
+
+    const handleEnergyRestore = (playerId, action) => {
+        const amount = action.energyAmount || 0.3;
+        players.forEach(p => {
+            if ((action.target === 'all' || p.id === playerId) && p.hp > 0) {
+                const val = Math.floor(p.maxEnergy * amount);
+                updatePlayerCombat(p.id, { energy: Math.min(p.maxEnergy, p.energy + val) });
+            }
+        });
+    };
+
+    const handlePhoneCall = (contactId) => {
+        const contact = PHONE_CONTACTS.find(c => c.id === contactId);
+
+        if (contact.req && !calledContacts.includes(contact.req)) {
+            addLog(`❌ Debes llamar a ${PHONE_CONTACTS.find(c => c.id === contact.req).name} primero.`);
             return;
         }
 
-        // Advance turn
-        if (playerId === 0) {
-            setCombatPhase('ANIMATING');
-            await new Promise(r => setTimeout(r, 800));
-            await handleBotsTurns();
-            setCombatPhase('BOSS_TURN');
-            setTimeout(handleBossTurn, 2000);
+        if (mainPlayer.energy < contact.cost) {
+            addLog("No tienes suficiente energía.");
+            return;
         }
-    };
 
-    const handleHeal = async (playerId, action) => {
-        const player = players.find(p => p.id === playerId);
-        const healAmount = action.healAmount || 0.3;
+        addLog(`📞 ${contact.name} responde al llamado...`);
+        setIsPhoneOpen(false);
+        setCalledContacts(prev => [...prev, contactId]);
 
-        if (action.target === 'all') {
-            players.forEach(p => {
-                if (p.hp > 0) {
-                    const healValue = Math.floor(p.maxHp * healAmount);
-                    updatePlayerCombat(p.id, { hp: Math.min(p.maxHp, p.hp + healValue) });
-                }
-            });
-            addLog(`${player.name} curó a todo el equipo!`);
-        } else {
-            // For single target, heal the player with lowest HP
-            const target = players.filter(p => p.hp > 0).sort((a, b) => a.hp - b.hp)[0];
-            if (target) {
-                const healValue = Math.floor(target.maxHp * healAmount);
-                updatePlayerCombat(target.id, { hp: Math.min(target.maxHp, target.hp + healValue) });
-                addLog(`${player.name} curó a ${target.name}!`);
+        if (contact.effect.type === 'damage') {
+            const damage = contact.effect.amount;
+            addLog(`¡${contact.name} INTERVIENE! -${damage} HP`);
+            const newBossHp = Math.max(0, currentBoss.hp - damage);
+            updateBossCombat({ hp: newBossHp });
+
+            if (newBossHp <= 0) {
+                setTimeout(onVictory, 2000);
+                return;
             }
+        } else if (contact.effect.type === 'energy') {
+            players.forEach(p => { if (p.hp > 0) updatePlayerCombat(p.id, { energy: Math.min(p.maxEnergy, p.energy + (p.maxEnergy * contact.effect.amount)) }) });
+            addLog(`${contact.name} motivó al equipo!`);
         }
 
-        updatePlayerCombat(playerId, { energy: player.energy - action.cost });
-        await advanceTurn(playerId);
+        updatePlayerCombat(mainPlayer.id, { energy: mainPlayer.energy - contact.cost });
+        advanceTurn(0);
     };
 
-    const handleBuff = async (playerId, action) => {
-        const player = players.find(p => p.id === playerId);
-        // Note: Buff system would require store updates to track buffs
-        // For now, just log it
-        addLog(`${player.name} aumentó ${action.stat === 'attack' ? 'el ataque' : 'la defensa'} del equipo!`);
-        updatePlayerCombat(playerId, { energy: player.energy - action.cost });
-        await advanceTurn(playerId);
-    };
-
-    const handleRevive = async (playerId, action) => {
-        const player = players.find(p => p.id === playerId);
-        const deadPlayer = players.find(p => p.hp <= 0);
-
-        if (deadPlayer) {
-            const reviveHp = Math.floor(deadPlayer.maxHp * 0.5);
-            const reviveEnergy = Math.floor(deadPlayer.maxEnergy * 0.5);
-            updatePlayerCombat(deadPlayer.id, { hp: reviveHp, energy: reviveEnergy });
-            addLog(`${player.name} revivió a ${deadPlayer.name}!`);
-        } else {
-            addLog(`No hay nadie que revivir.`);
-        }
-
-        updatePlayerCombat(playerId, { energy: player.energy - action.cost });
-        await advanceTurn(playerId);
-    };
-
-    const handleEnergyRestore = async (playerId, action) => {
-        const player = players.find(p => p.id === playerId);
-        const energyAmount = action.energyAmount || 0.3;
-
-        if (action.target === 'all') {
-            players.forEach(p => {
-                if (p.hp > 0) {
-                    const energyValue = Math.floor(p.maxEnergy * energyAmount);
-                    updatePlayerCombat(p.id, { energy: Math.min(p.maxEnergy, p.energy + energyValue) });
-                }
-            });
-            addLog(`${player.name} restauró energía a todo el equipo!`);
-        } else {
-            const target = players.filter(p => p.hp > 0).sort((a, b) => a.energy - b.energy)[0];
-            if (target) {
-                const energyValue = Math.floor(target.maxEnergy * energyAmount);
-                updatePlayerCombat(target.id, { energy: Math.min(target.maxEnergy, target.energy + energyValue) });
-                addLog(`${player.name} restauró energía a ${target.name}!`);
-            }
-        }
-
-        updatePlayerCombat(playerId, { energy: player.energy - action.cost });
-        await advanceTurn(playerId);
-    };
+    // --- TURN MANAGER ---
 
     const advanceTurn = async (playerId) => {
         if (playerId === 0) {
             setCombatPhase('ANIMATING');
-            await new Promise(r => setTimeout(r, 800));
+            await new Promise(r => setTimeout(r, 600));
             await handleBotsTurns();
+
             setCombatPhase('BOSS_TURN');
-            setTimeout(handleBossTurn, 2000);
+            if (boss.dialogues) {
+                villainSay(boss.dialogues[Math.floor(Math.random() * boss.dialogues.length)]);
+            }
+            setTimeout(handleBossTurn, 2500);
         }
     };
 
-    const handleDefend = async () => {
-        if (combatPhase !== 'PLAYERS_TURN' || players[0].hp <= 0) return;
+    const allyForCombo = players.slice(1).find(bot => {
+        const key1 = `0-${bot.id}`;
+        const key2 = `${bot.id}-0`;
+        const bondsObj = network.bonds || {};
+        const bond = (bondsObj[key1] || 0) + (bondsObj[key2] || 0);
+        return bond >= 5 && mainPlayer.energy >= 50 && bot.energy >= 50 && bot.hp > 0;
+    });
 
-        const player = players[0];
-        updatePlayerCombat(0, {
-            isDefending: true,
-            energy: Math.min(player.maxEnergy, player.energy + 20)
-        });
-        addLog(`${player.name} se defiende y recupera energía!`);
-
-        // Advance turn like a card action
-        setCombatPhase('ANIMATING');
-        await new Promise(r => setTimeout(r, 800));
-        await handleBotsTurns();
-        setCombatPhase('BOSS_TURN');
-        setTimeout(handleBossTurn, 2000);
+    const handleCombinedAttack = () => {
+        if (!allyForCombo) return;
+        
+        updatePlayerCombat(0, { energy: mainPlayer.energy - 50 });
+        updatePlayerCombat(allyForCombo.id, { energy: allyForCombo.energy - 50 });
+        
+        setShowCutIn(mainPlayer);
+        setTimeout(() => setShowCutIn(allyForCombo), 2000);
+        setTimeout(() => {
+            const damage = 250 + ((mainPlayer.str || 10) * 5) + ((allyForCombo.str || 10) * 5);
+            addLog(`🌟 ¡ATAQUE COMBINADO! ${mainPlayer.name} y ${allyForCombo.name} destrozan a ${boss.bossName} por ${damage} de daño!`);
+            const newBossHp = Math.max(0, currentBoss.hp - damage);
+            updateBossCombat({ hp: newBossHp });
+            
+            if (newBossHp <= 0) setTimeout(onVictory, 1500);
+            else setTimeout(() => setCombatPhase('BOSS_TURN'), 1500);
+        }, 4000);
     };
 
     const handleBotsTurns = async () => {
-        const { registerActionScore } = useGameStore.getState();
         for (let i = 1; i < 4; i++) {
             const bot = players[i];
             if (bot.hp <= 0) continue;
 
-            const cards = bot.roleCards || [];
-            const playableCards = cards.filter(c => c.cost <= bot.energy);
-
-            if (playableCards.length > 0) {
-                const action = playableCards[Math.floor(Math.random() * playableCards.length)];
-                const riceFactor = action.riceFactor || 1.0;
-                const damage = Math.floor(action.damage * riceFactor);
-
-                const newBossHp = Math.max(0, currentBoss.hp - damage);
-                updateBossCombat({ hp: newBossHp });
-                updatePlayerCombat(bot.id, { energy: bot.energy - action.cost, isDefending: false });
-                registerActionScore(riceFactor);
-                addLog(`${bot.name} usó ${action.title}!`);
+            const action = bot.roleCards.find(c => c.cost <= bot.energy && c.type === 'attack');
+            if (action) {
+                const dmg = Math.floor(action.damage * (action.riceFactor || 1));
+                updateBossCombat({ hp: Math.max(0, currentBoss.hp - dmg) });
+                updatePlayerCombat(bot.id, { energy: bot.energy - action.cost });
+                addLog(`${bot.name} ataca.`);
+                chargeSuper(Math.floor(dmg / 3)); // Bots contribute to Super!
+                await new Promise(r => setTimeout(r, 400));
             } else {
-                updatePlayerCombat(bot.id, { isDefending: true, energy: Math.min(bot.maxEnergy, bot.energy + 20) });
-                addLog(`${bot.name} se está defendiendo.`);
+                updatePlayerCombat(bot.id, { energy: Math.min(bot.maxEnergy, bot.energy + 15) });
             }
-            await new Promise(r => setTimeout(r, 600));
         }
     };
 
     const handleBossTurn = () => {
+        setShowDiceGame(true);
+    };
+
+    const handleDiceResult = (mitigation) => {
+        setShowDiceGame(false);
+
         const skill = boss.skills[Math.floor(Math.random() * boss.skills.length)];
-        addLog(`¡${boss.bossName} usa ${skill.name}!`);
+        let log = `${boss.bossName} usa ${skill.name}`;
 
         players.forEach(p => {
             if (p.hp <= 0) return;
-            const finalDamage = p.isDefending ? Math.floor(skill.damage * (Math.random() * 0.4)) : skill.damage;
-            updatePlayerCombat(p.id, { hp: Math.max(0, p.hp - finalDamage), isDefending: false });
+
+            let rawDmg = skill.damage || 10;
+            if (network.rumorLevel >= 80) rawDmg = Math.floor(rawDmg * 1.5); // 50% extra damage if rumor is high!
+
+            let finalMit = p.id === 0 ? mitigation : (Math.random() * 0.4);
+
+            if (p.isDefending) finalMit += 0.3;
+            if (finalMit > 0.8) finalMit = 0.8;
+
+            if (p.unlockedPassives?.includes('evasion') && Math.random() < 0.15) {
+                finalMit = 1.0; // 100% mitigation = evasion
+            }
+
+            const taken = Math.floor(rawDmg * (1 - finalMit));
+
+            if (taken === 0 && finalMit === 1.0 && p.unlockedPassives?.includes('evasion')) {
+                addLog(`¡${p.name} EVADIÓ el ataque gracias a su Tolerancia! 🛡️`);
+            } else {
+                updatePlayerCombat(p.id, { hp: Math.max(0, p.hp - taken), isDefending: false });
+            }
         });
+
+        addLog(`${log}. daño reducido en ${(mitigation * 100).toFixed(0)}%`);
 
         if (players.every(p => p.hp <= 0)) {
             onDefeat();
@@ -262,329 +331,307 @@ export default function RpgCombat({ boss, onVictory, onDefeat, openShop }) {
 
     const handleSuperPower = () => {
         if (superCharge < 100) return;
-
-        const avgRice = network.totalActions > 0
-            ? (network.totalRiceScore / network.totalActions)
-            : 1.0;
-
-        addLog("¡TODOS JUNTOS: SUPER PODER DE LA AMISTAD!");
-
-        // Damage depends on average RICE compliance
-        const baseSuperDamage = 250;
-        const totalDamage = Math.floor(baseSuperDamage * avgRice);
-
-        addLog(`✨ Eficacia de Convivencia: ${Math.floor(avgRice * 100)}%`);
-        addLog(`💥 El villano recibe ${totalDamage} de daño!`);
-
-        updateBossCombat({ hp: Math.max(0, currentBoss.hp - totalDamage) });
+        addLog("¡¡PODER DE LA AMISTAD!!");
+        updateBossCombat({ hp: Math.max(0, currentBoss.hp - 350) });
         resetSuper();
+        if (currentBoss.hp - 350 <= 0) setTimeout(onVictory, 2000);
+    };
 
-        if (currentBoss.hp - totalDamage <= 0) {
-            setTimeout(onVictory, 2000);
-        }
+    const getElementIcon = (el) => {
+        if (el === 'fire') return '🔥';
+        if (el === 'water') return '💧';
+        if (el === 'earth') return '🌿';
+        if (el === 'wind') return '💨';
+        if (el === 'electric') return '⚡';
+        if (el === 'ice') return '❄️';
+        return '⚔️';
     };
 
     return (
-        <div className="flex flex-col h-full bg-slate-950 text-white overflow-hidden font-sans relative">
-            {/* BACKGROUND ANIMATION */}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-slate-950 to-black -z-10" />
+        <div className="flex flex-col h-full bg-slate-950 text-white overflow-hidden font-sans relative select-none">
+            {/* BACKGROUND */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black -z-10" />
 
-            {/* TOP BAR: BOSS INFO (CLEANER) */}
-            <div className="p-6 flex justify-center items-center relative gap-8">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-50" />
-
-                <div className="text-center">
-                    <h2 className="text-3xl font-black uppercase italic tracking-[0.2em] text-red-100 drop-shadow-lg">{boss.bossName}</h2>
-                    <div className="mt-2 flex items-center justify-center gap-4">
-                        <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">Amenaza Nivel Grave</span>
-                        <div className="w-96 h-3 bg-gray-900/80 rounded-full overflow-hidden border border-white/10 shadow-inner">
-                            <motion.div
-                                initial={{ width: "100%" }}
-                                animate={{ width: `${(currentBoss.hp / boss.maxHp) * 100}%` }}
-                                className="h-full bg-gradient-to-r from-red-700 via-red-500 to-orange-400 relative"
-                            >
-                                <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.1)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.1)_50%,rgba(255,255,255,0.1)_75%,transparent_75%,transparent)] bg-[length:20px_20px] animate-[slide_1s_linear_infinite]" />
-                            </motion.div>
-                        </div>
-                        <span className="text-xs font-mono font-bold text-red-100">{currentBoss.hp} <span className="text-[10px] text-red-500/50">HP</span></span>
+            {/* HEADER */}
+            <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-start z-10">
+                {/* BOSS BAR (Center) */}
+                <div className="flex-1 flex flex-col items-center">
+                    {/* Boss Name + Weakness Icon */}
+                    <div className="flex items-center gap-3 mb-1">
+                        <h2 className="text-2xl font-black uppercase text-red-500 drop-shadow-md tracking-wider">{currentBoss.bossName}</h2>
+                        {boss.weakness && (
+                            <div className="w-8 h-8 bg-black/60 rounded-full flex items-center justify-center border border-red-500/50 shadow-lg animate-pulse" title={`Débil a ${boss.weakness}`}>
+                                <span className="text-xl">{getElementIcon(boss.weakness)}</span>
+                            </div>
+                        )}
                     </div>
+
+                    {/* HP Bar */}
+                    <div className="w-96 max-w-full h-8 bg-gray-900 rounded-full border-2 border-slate-700 relative overflow-hidden shadow-2xl">
+                        <motion.div
+                            initial={{ width: "100%" }}
+                            animate={{ width: `${(currentBoss.hp / boss.maxHp) * 100}%` }}
+                            className="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-red-600 via-red-500 to-orange-500"
+                        />
+                        <span className="absolute inset-0 flex items-center justify-center text-xs font-black text-white shadow-black drop-shadow-md tracking-widest">
+                            {currentBoss.hp} / {boss.maxHp} HP
+                        </span>
+                    </div>
+
+                    {/* WEAKNESS/RESISTANCE LABELS */}
+                    <div className="flex gap-4 mt-2 bg-black/40 px-4 py-1.5 rounded-full backdrop-blur-md border border-white/5 shadow-xl">
+                        <div className="flex items-center gap-1.5 text-xs font-bold">
+                            <span className="text-gray-400 uppercase text-[10px]">Débil:</span>
+                            <span className="text-green-400 uppercase flex items-center gap-1 bg-green-900/30 px-1.5 py-0.5 rounded">{getElementIcon(boss.weakness)} {boss.weakness}</span>
+                        </div>
+                        <div className="w-px h-4 bg-white/10"></div>
+                        <div className="flex items-center gap-1.5 text-xs font-bold">
+                            <span className="text-gray-400 uppercase text-[10px]">Resiste:</span>
+                            <span className="text-red-400 uppercase flex items-center gap-1 bg-red-900/30 px-1.5 py-0.5 rounded">{getElementIcon(boss.resistance)} {boss.resistance}</span>
+                        </div>
+                    </div>
+                    {/* RUMOR METER CAUTION */}
+                    {network.rumorLevel >= 80 && (
+                        <div className="mt-2 bg-red-900/80 animate-pulse border border-red-500 rounded px-3 py-1 text-xs font-black uppercase shadow-lg">
+                            ⚠️ Escuela en caos: ¡Jefe Potenciado!
+                        </div>
+                    )}
+                </div>
+
+                {/* TEAMMATES (Top Right) */}
+                <div className="flex flex-col gap-2 bg-black/40 p-2 rounded-xl backdrop-blur-sm border border-white/10">
+                    <div className="text-[10px] text-gray-400 font-bold uppercase tracking-wider text-right">Equipo</div>
+                    {players.slice(1).map(bot => (
+                        <div key={bot.id} className="flex items-center gap-2 justify-end">
+                            <div className="flex flex-col items-end w-24">
+                                <span className="text-xs font-bold truncate">{bot.name}</span>
+                                {/* Mini HP Bar */}
+                                <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden mb-0.5">
+                                    <div className="h-full bg-green-500" style={{ width: `${(bot.hp / bot.maxHp) * 100}%` }} />
+                                </div>
+                                {/* Mini Energy Bar */}
+                                <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                                    <div className="h-full bg-yellow-400" style={{ width: `${(bot.energy / bot.maxEnergy) * 100}%` }} />
+                                </div>
+                            </div>
+                            <img src={bot.avatar} className="w-8 h-8 rounded-full border border-white/30 bg-slate-800" />
+                        </div>
+                    ))}
                 </div>
             </div>
 
-            {/* MAIN COMBAT AREA */}
-            <div className="flex-1 flex min-h-0 relative px-4">
-
-                {/* FLOATING COMBAT LOG */}
-                <div className="w-64 flex flex-col pointer-events-none">
-                    <div className="bg-black/60 backdrop-blur-md border border-white/5 rounded-2xl overflow-hidden flex flex-col h-[60%]">
-                        <div className="p-2 bg-white/5 border-b border-white/5 flex items-center gap-2">
-                            <Sparkles size={12} className="text-amber-400" />
-                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Canal RICE</span>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-3 flex flex-col-reverse gap-2 pointer-events-auto">
-                            <AnimatePresence>
-                                {combatLog.map((log, i) => (
-                                    <motion.div
-                                        initial={{ opacity: 0, x: -20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        key={`log-${i}`}
-                                        className={`p-2 rounded-lg text-[10px] leading-relaxed ${log.includes('usó') ? 'bg-blue-500/10 text-blue-100 border-l-2 border-blue-500' :
-                                            log.includes('daño') ? 'bg-red-500/10 text-red-100 border-l-2 border-red-500' :
-                                                log.includes('RICE') ? 'bg-amber-500/10 text-amber-100 border-l-2 border-amber-500 font-bold' :
-                                                    'text-gray-400'
-                                            }`}
-                                    >
-                                        {log}
-                                    </motion.div>
-                                ))}
-                            </AnimatePresence>
-                        </div>
-                    </div>
-                </div>
-
-                {/* CENTERED VILLAIN */}
-                <div className="flex-1 flex items-center justify-center relative">
-                    <AnimatePresence mode="wait">
-                        <motion.div
-                            key={boss.id}
-                            className="relative max-w-sm w-full aspect-square flex items-center justify-center translate-y-[-20px]"
-                        >
-                            <div className="absolute inset-0 bg-red-600/10 blur-[120px] rounded-full animate-pulse" />
-                            <motion.img
-                                src={boss.image}
-                                alt={boss.bossName}
-                                onError={(e) => {
-                                    e.target.onerror = null;
-                                    e.target.src = "https://api.dicebear.com/7.x/icons/svg?seed=enemy";
-                                }}
-                                className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_50px_rgba(255,0,0,0.3)]"
-                                animate={{
-                                    y: [0, -10, 0],
-                                    scale: combatPhase === 'BOSS_TURN' ? 1.05 : 1,
-                                    filter: combatPhase === 'BOSS_TURN' ? 'drop-shadow(0 0 60px rgba(255,0,0,0.6))' : 'drop-shadow(0 0 40px rgba(255,0,0,0.3))'
-                                }}
-                                transition={{ y: { repeat: Infinity, duration: 3, ease: "easeInOut" } }}
-                            />
-
-                            {/* TURN INDICATOR */}
-                            <div className="absolute bottom-[-10%] left-1/2 -translate-x-1/2">
-                                <motion.div
-                                    animate={{ opacity: [0.5, 1, 0.5] }}
-                                    transition={{ repeat: Infinity, duration: 2 }}
-                                    className="px-6 py-1 bg-amber-400 rounded-full shadow-[0_0_20px_rgba(251,191,36,0.5)]"
-                                >
-                                    <span className="text-[10px] font-black text-slate-900 uppercase italic tracking-widest whitespace-nowrap">
-                                        {combatPhase === 'PLAYERS_TURN' ? "Tu Turno de Acción" : "El Enemigo Ataca"}
-                                    </span>
-                                </motion.div>
-                            </div>
-                        </motion.div>
+            {/* MAIN STAGE */}
+            <div className="flex-1 flex items-center justify-center relative z-0">
+                {/* COMBAT LOG */}
+                <div className="absolute left-6 top-20 bottom-32 w-64 pointer-events-none flex flex-col justify-end pb-4 z-20">
+                    <AnimatePresence>
+                        {combatLog.map((log, i) => (
+                            <motion.div key={i} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="bg-black/60 p-2 my-1 rounded-r-lg text-xs backdrop-blur-md border-l-4 border-blue-500 shadow-lg">
+                                {log}
+                            </motion.div>
+                        ))}
                     </AnimatePresence>
                 </div>
 
-                {/* EMPY RIGHT SPACE FOR BALANCE */}
-                <div className="w-64" />
+                {/* VILLAIN */}
+                <div className="relative w-80 h-80 flex items-center justify-center">
+                    <AnimatePresence>
+                        {villainSpeech && (
+                            <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="absolute -top-20 right-0 bg-white text-black p-4 rounded-3xl rounded-bl-none shadow-[0_10px_30px_rgba(0,0,0,0.5)] z-50 font-black text-sm max-w-[200px] border-4 border-slate-900">
+                                "{villainSpeech}"
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
+                    <motion.img
+                        src={boss.image}
+                        onError={(e) => { e.target.onerror = null; e.target.src = 'https://api.dicebear.com/7.x/bottts/svg?seed=' + boss.id }}
+                        className="w-full h-full object-contain filter drop-shadow-[0_0_50px_rgba(220,38,38,0.4)]"
+                        animate={{
+                            scale: combatPhase === 'BOSS_TURN' ? 1.05 : 1,
+                            y: [0, -10, 0]
+                        }}
+                        transition={{ y: { duration: 3, repeat: Infinity, ease: "easeInOut" } }}
+                    />
+                </div>
             </div>
 
-            {/* THE NEW DASHBOARD: FULL WIDTH AT BOTTOM */}
-            <div className="bg-black/80 border-t border-white/10 backdrop-blur-2xl p-6 flex gap-6 items-center min-h-[16rem] relative z-50">
+            {/* BOTTOM HUD */}
+            <div className="h-auto min-h-[220px] bg-slate-900/95 border-t border-white/10 p-4 grid grid-cols-[200px_1fr_100px] gap-4 items-end relative z-20 backdrop-blur-lg">
 
-                {/* 1. TEAM STATUS (LEFT) */}
-                <div className="w-72 flex flex-col gap-3 pr-6 border-r border-white/10">
-                    <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                            Estado del Equipo
-                        </span>
+                {/* 1. PLAYER STATS (Left) */}
+                <div className="flex flex-col gap-2 p-3 bg-slate-800/50 rounded-xl border border-white/5">
+                    <div className="flex items-center gap-3 mb-1">
+                        <img src={mainPlayer.avatar} className="w-14 h-14 rounded-full border-2 border-blue-400 bg-slate-900 shadow-lg" />
+                        <div>
+                            <div className="font-black text-sm text-blue-200 flex gap-2 items-center">
+                                {mainPlayer.name} <span className="bg-amber-500 text-black px-1.5 rounded text-[10px]">Nv.{mainPlayer.level || 1}</span>
+                            </div>
+                            <div className="text-[10px] text-gray-400 mb-1">{mainPlayer.role}</div>
+                            <div className="flex gap-2 text-[10px] font-bold bg-black/40 px-2 py-0.5 rounded w-fit text-white/80">
+                                <span>⚔️STR: <span className="text-red-400">{mainPlayer.str || 10}</span></span>
+                                <span>🔮INT: <span className="text-blue-400">{mainPlayer.int || 10}</span></span>
+                            </div>
+                        </div>
                     </div>
-                    {players.map((p) => {
-                        const isMe = p.id === 0;
-                        return (
-                            <div key={p.id} className={`flex items-center gap-3 p-2 rounded-2xl border ${isMe ? 'bg-white/10 border-amber-400/30' : 'bg-white/5 border-white/5 opacity-80'}`}>
-                                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-white/10 overflow-hidden shrink-0 relative">
-                                    <img src={p.avatar} className="w-full h-full object-cover" />
-                                    {p.isDefending && <div className="absolute inset-0 bg-blue-500/40 flex items-center justify-center"><Shield size={16} className="text-white" /></div>}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className={`text-[11px] font-bold truncate ${isMe ? 'text-amber-400' : 'text-white'}`}>{p.name}</span>
-                                        <span className="text-[9px] font-mono opacity-50">{p.hp} HP</span>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <div className="h-1.5 bg-gray-900 rounded-full overflow-hidden">
-                                            <motion.div animate={{ width: `${(p.hp / p.maxHp) * 100}%` }} className="h-full bg-gradient-to-r from-green-600 to-green-400" />
-                                        </div>
-                                        <div className="h-1 bg-gray-900 rounded-full overflow-hidden">
-                                            <motion.div animate={{ width: `${(p.energy / p.maxEnergy) * 100}%` }} className="h-full bg-yellow-400" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
+                    {/* HP */}
+                    <div className="relative w-full h-4 bg-gray-900 rounded-full overflow-hidden border border-white/10">
+                        <div className="absolute top-0 bottom-0 left-0 bg-green-500" style={{ width: `${(mainPlayer.hp / mainPlayer.maxHp) * 100}%` }} />
+                        <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold z-10">{mainPlayer.hp}/{mainPlayer.maxHp}</div>
+                    </div>
+                    {/* Energy */}
+                    <div className="relative w-full h-4 bg-gray-900 rounded-full overflow-hidden border border-white/10">
+                        <div className="absolute top-0 bottom-0 left-0 bg-yellow-400" style={{ width: `${(mainPlayer.energy / mainPlayer.maxEnergy) * 100}%` }} />
+                        <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold z-10 text-black">{mainPlayer.energy}/{mainPlayer.maxEnergy}</div>
+                    </div>
                 </div>
 
-                {/* 2. UTILITY BUTTONS (SHIELD & SHOP) */}
-                <div className="flex flex-col gap-4">
-                    <button
-                        onClick={handleDefend}
-                        disabled={combatPhase !== 'PLAYERS_TURN' || players[0].hp <= 0}
-                        className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all shadow-xl group ${combatPhase === 'PLAYERS_TURN'
-                            ? 'bg-blue-600 hover:bg-blue-500 hover:scale-105 active:scale-95 shadow-blue-600/20'
-                            : 'bg-gray-800 opacity-40 grayscale'
-                            }`}
-                        title="Defender: Reduce daño y recupera energía"
-                    >
-                        <Shield className="text-white group-hover:animate-bounce" size={24} />
-                        <span className="text-[8px] font-black uppercase">Protección</span>
-                    </button>
-
-                    <button
-                        onClick={() => setIsInventoryOpen(true)}
-                        className="w-16 h-16 rounded-2xl bg-purple-600 text-white flex flex-col items-center justify-center gap-1 transition-all shadow-xl shadow-purple-600/20 hover:bg-purple-500 hover:scale-105 active:scale-95 group relative"
-                        title="Inventario: Usa tus pociones"
-                    >
-                        <Package className="group-hover:rotate-12 transition-transform" size={24} />
-                        <span className="text-[8px] font-black uppercase">Inventario</span>
-                        {network.sessionInventory.length > 0 && (
-                            <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-[10px] font-black border-2 border-slate-950">
-                                {network.sessionInventory.length}
-                            </div>
-                        )}
-                    </button>
-
-                    <button
-                        onClick={openShop}
-                        className="w-16 h-16 rounded-2xl bg-amber-400 text-slate-900 flex flex-col items-center justify-center gap-1 transition-all shadow-xl shadow-amber-400/20 hover:bg-amber-500 hover:scale-105 active:scale-95 group"
-                    >
-                        <ShoppingBag className="group-hover:rotate-12 transition-transform" size={24} />
-                        <span className="text-[8px] font-black uppercase">Tienda</span>
-                    </button>
-                </div>
-
-                {/* 3. CARD HAND (CENTER) */}
-                <div className="flex-1 flex gap-4 items-center justify-center overflow-x-auto py-4 px-2 no-scrollbar">
-                    {players[0].roleCards?.map((card, idx) => (
-                        <motion.div
-                            key={`rpg-card-${idx}`}
-                            whileHover={{ y: -30, scale: 1.05, zIndex: 100 }}
+                {/* 2. CARDS & BUTTONS (Center) */}
+                <div className="flex items-end justify-center gap-4 w-full overflow-x-auto pb-2">
+                    {/* Cards */}
+                    {mainPlayer.roleCards.map((card, i) => (
+                        <motion.button
+                            key={i}
                             onClick={() => handlePlayerAction(0, card)}
-                            className={`w-36 h-52 bg-white rounded-2xl border-2 shadow-2xl p-4 flex flex-col cursor-pointer transition-all shrink-0 relative overflow-hidden group ${combatPhase === 'PLAYERS_TURN' && players[0].energy >= card.cost
-                                ? 'border-amber-400 ring-4 ring-amber-400/10'
-                                : 'opacity-40 grayscale pointer-events-none border-gray-200'
-                                }`}
+                            disabled={mainPlayer.energy < card.cost}
+                            whileHover={{ y: -20, scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            className={`w-36 h-52 shrink-0 bg-slate-800 rounded-xl border-2 p-2 flex flex-col gap-1 shadow-xl transition-all
+                                ${mainPlayer.energy < card.cost ? 'opacity-50 grayscale border-slate-700' : 'border-blue-500 hover:border-white hover:shadow-blue-500/30'}
+                            `}
                         >
-                            <div className="absolute top-0 left-0 w-full h-1 bg-amber-400" />
-                            <div className="text-[11px] font-black text-slate-900 uppercase leading-tight mb-2 border-b pb-2">
-                                {card.title}
+                            <div className="h-24 bg-slate-900 rounded-lg mb-1 relative overflow-hidden flex items-center justify-center">
+                                <span className="text-4xl opacity-50">{getElementIcon(card.element)}</span>
+                                <span className="absolute top-1 right-1 text-[9px] font-black uppercase bg-black/50 px-1 rounded">{card.type}</span>
                             </div>
-                            <div className="flex-1 text-[9px] text-gray-500 leading-relaxed italic overflow-hidden">
-                                {card.desc}
+                            <div className="font-bold text-xs text-center leading-tight">{card.title}</div>
+                            <div className="flex-1 text-[9px] text-gray-400 text-center leading-tight line-clamp-2 px-1">{card.desc}</div>
+                            <div className="flex justify-between items-center bg-black/20 rounded p-1">
+                                <span className="text-yellow-400 text-xs font-bold flex items-center gap-0.5"><Zap size={10} />{card.cost}</span>
+                                {card.damage && <span className="text-red-400 text-xs font-bold flex items-center gap-0.5"><Sword size={10} />{Math.floor(card.damage * (card.riceFactor || 1))}</span>}
                             </div>
-
-                            {/* RICE INDICATOR STICKER */}
-                            {card.riceFactor >= 0.8 && (
-                                <div className="absolute top-2 right-2 flex gap-0.5">
-                                    {[...Array(Math.floor(card.riceFactor * 3))].map((_, i) => (
-                                        <Sparkles key={i} size={8} className="text-amber-500" />
-                                    ))}
-                                </div>
-                            )}
-
-                            <div className="mt-auto pt-2 border-t flex justify-between items-center">
-                                <div className="flex flex-col">
-                                    <span className="text-[8px] font-black text-gray-400 uppercase">Energía</span>
-                                    <span className="text-sm font-black text-yellow-600 flex items-center gap-1">
-                                        <Zap size={12} fill="currentColor" /> {card.cost}
-                                    </span>
-                                </div>
-                                <div className="flex flex-col items-end">
-                                    <span className="text-[8px] font-black text-gray-400 uppercase">Impacto</span>
-                                    <span className="text-sm font-black text-red-600 flex items-center gap-1">
-                                        <Sword size={12} /> {Math.floor(card.damage * (card.riceFactor || 1))}
-                                    </span>
-                                </div>
-                            </div>
-                        </motion.div>
+                        </motion.button>
                     ))}
+
+                    {/* Action Buttons Column */}
+                    <div className="flex flex-col gap-2">
+                        {/* Shield */}
+                        <button onClick={handleDefend} className="w-14 h-14 bg-blue-600 rounded-xl flex items-center justify-center hover:scale-105 transition shadow-lg border-b-4 border-blue-800 text-white relative group" title="Defender">
+                            <Shield size={24} />
+                            <span className="absolute -top-8 bg-black text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap">Defender (+15 EN)</span>
+                        </button>
+                        {/* Phone */}
+                        <button onClick={() => setIsPhoneOpen(!isPhoneOpen)} className="w-14 h-14 bg-emerald-500 rounded-xl flex items-center justify-center hover:scale-105 transition shadow-lg border-b-4 border-emerald-700 text-white relative group">
+                            <Phone size={24} />
+                            {isPhoneOpen && <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping" />}
+                        </button>
+                        {/* Combo Attack */}
+                        {allyForCombo && (
+                            <button onClick={handleCombinedAttack} className="w-14 h-14 bg-amber-500 rounded-xl flex items-center justify-center hover:scale-105 transition shadow-[0_0_15px_#fbbf24] border-b-4 border-orange-600 text-black relative group animate-pulse" title={`Ataque Combinado con ${allyForCombo.name}`}>
+                                <Sparkles size={24} />
+                                <span className="absolute -top-8 right-0 bg-black text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap text-amber-400 font-bold border border-amber-500">Combo (-50 EN los 2)</span>
+                            </button>
+                        )}
+                    </div>
                 </div>
 
-                {/* 4. SUPER POWER CIRCLE (RIGHT) */}
-                <div className="pl-6 border-l border-white/10 flex flex-col items-center gap-3">
-                    <div className="relative w-28 h-28">
-                        {/* THE CIRCULAR SVG LOADER */}
-                        <svg className="w-full h-full rotate-[-90deg]">
-                            <circle
-                                cx="56"
-                                cy="56"
-                                r="50"
-                                className="fill-none stroke-gray-900"
-                                strokeWidth="8"
-                            />
-                            <motion.circle
-                                cx="56"
-                                cy="56"
-                                r="50"
-                                className="fill-none stroke-amber-400"
-                                strokeWidth="8"
-                                strokeDasharray="314.159"
-                                initial={{ strokeDashoffset: 314.159 }}
-                                animate={{ strokeDashoffset: 314.159 - (314.159 * (superCharge / 100)) }}
-                                strokeLinecap="round"
-                            />
-                        </svg>
-
-                        {/* INNER BUTTON */}
-                        <button
-                            onClick={handleSuperPower}
-                            disabled={superCharge < 100 || combatPhase !== 'PLAYERS_TURN'}
-                            className={`absolute inset-4 rounded-full flex flex-col items-center justify-center border-4 transition-all overflow-hidden group ${superCharge >= 100
-                                ? 'bg-amber-400 border-white text-slate-950 hover:scale-110 active:scale-90 animate-pulse'
-                                : 'bg-slate-900 border-white/5 text-slate-700'
-                                }`}
-                        >
-                            <Sparkles size={24} className={superCharge >= 100 ? "animate-spin" : ""} />
-                            <span className="text-[10px] font-black uppercase italic">¡Super!</span>
-
-                            {/* GLOW EFFECT WHEN READY */}
-                            {superCharge >= 100 && (
-                                <motion.div
-                                    animate={{ opacity: [0, 0.5, 0] }}
-                                    transition={{ repeat: Infinity, duration: 1 }}
-                                    className="absolute inset-0 bg-white"
-                                />
-                            )}
+                {/* 3. ITEMS, SHOP & SUPER (Right) - Stacked Vertical */}
+                <div className="flex flex-col items-center gap-3 self-end mb-2">
+                    <div className="grid grid-cols-3 gap-2">
+                        <button onClick={() => setIsInventoryOpen(true)} className="w-14 h-14 bg-purple-600 rounded-xl flex items-center justify-center hover:scale-105 transition shadow-lg border-b-4 border-purple-800 text-white active:border-b-0 active:translate-y-1" title="Inventario">
+                            <Package size={24} />
+                        </button>
+                        <button onClick={() => setIsMaturityOpen(true)} className="w-14 h-14 bg-amber-600 rounded-xl flex items-center justify-center hover:scale-105 transition shadow-lg border-b-4 border-amber-800 text-white active:border-b-0 active:translate-y-1 relative" title="Desarrollo Personal">
+                            <Sparkles size={24} />
+                            {mainPlayer.maturityPoints > 0 && <span className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center border border-white font-bold">{mainPlayer.maturityPoints}</span>}
+                        </button>
+                        <button onClick={openShop} className="w-14 h-14 bg-amber-500 rounded-xl flex items-center justify-center hover:scale-105 transition shadow-lg border-b-4 border-amber-700 text-slate-900 active:border-b-0 active:translate-y-1" title="Tienda">
+                            <ShoppingBag size={24} />
                         </button>
                     </div>
-                    <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Amistad {superCharge}%</span>
+
+                    {/* Super Power */}
+                    <div className="relative group w-full flex justify-center mt-2">
+                        <button
+                            onClick={handleSuperPower}
+                            disabled={superCharge < 100}
+                            className={`w-24 h-24 rounded-full border-[6px] flex items-center justify-center transition-all relative overflow-hidden shadow-2xl
+                                ${superCharge >= 100 ? 'border-amber-400 shadow-[0_0_50px_#fbbf24] animate-pulse cursor-pointer bg-slate-900' : 'border-slate-800 opacity-80 cursor-not-allowed bg-slate-900'}
+                            `}
+                        >
+                            {/* Liquid Fill Effect */}
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-amber-600 via-amber-500 to-yellow-400 transition-all duration-700 ease-out" style={{ height: `${superCharge}%` }} />
+
+                            <div className="relative z-10 p-2 bg-black/20 rounded-full backdrop-blur-[2px]">
+                                <Sparkles size={32} className={`drop-shadow-lg ${superCharge >= 100 ? 'text-white animate-spin-slow' : 'text-gray-600'}`} />
+                            </div>
+                        </button>
+                        <div className="absolute -bottom-4 left-0 right-0 text-center">
+                            <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full border shadow-lg ${superCharge >= 100 ? 'bg-amber-500 text-black border-white animate-bounce' : 'bg-slate-900 text-gray-500 border-gray-700'}`}>
+                                {Math.floor(superCharge)}% PODER
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* CSS ANIMATIONS */}
-            <style>{`
-                @keyframes slide {
-                    from { background-position: 0 0; }
-                    to { background-position: 40px 0; }
-                }
-                .no-scrollbar::-webkit-scrollbar { display: none; }
-                .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-            `}</style>
+            {/* MODALS */}
+            <InventoryModal isOpen={isInventoryOpen} onClose={() => setIsInventoryOpen(false)} inventory={network.sessionInventory} onUseItem={(id) => { useSessionItem(id, 0); setIsInventoryOpen(false); }} />
+            <PrecisionMinigame isOpen={showMinigame} onComplete={(m, c) => { setShowMinigame(false); if (pendingAction) executeAction(pendingAction.playerId, pendingAction.action, m, c); }} />
+            <CutIn player={showCutIn} onComplete={() => setShowCutIn(null)} />
+            <MaturityTree isOpen={isMaturityOpen} onClose={() => setIsMaturityOpen(false)} />
 
-            {/* INVENTORY MODAL */}
-            <InventoryModal
-                isOpen={isInventoryOpen}
-                onClose={() => setIsInventoryOpen(false)}
-                inventory={network.sessionInventory}
-                onUseItem={(sessionId) => {
-                    useSessionItem(sessionId, 0);
-                    setIsInventoryOpen(false);
-                }}
-            />
+            {/* FORCE REMOUNT DICE GAME FOR RESET */}
+            {showDiceGame && (
+                <DiceMinigame
+                    key={`dice-game-${Date.now()}`}
+                    isOpen={true}
+                    onComplete={handleDiceResult}
+                />
+            )}
 
-            {/* PRECISION MINIGAME */}
-            <PrecisionMinigame
-                isOpen={showMinigame}
-                onComplete={handleMinigameComplete}
-            />
+            {/* PHONE MENU POPUP */}
+            <AnimatePresence>
+                {isPhoneOpen && (
+                    <>
+                        <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setIsPhoneOpen(false)} />
+                        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }} className="absolute bottom-24 right-32 bg-slate-900 border border-slate-600 text-white p-4 rounded-2xl shadow-2xl z-50 w-72">
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="font-bold text-lg flex items-center gap-2 text-emerald-400"><Phone size={20} /> Contactos</h3>
+                                <button onClick={() => setIsPhoneOpen(false)} className="text-gray-500 hover:text-white">✕</button>
+                            </div>
+                            <div className="space-y-2">
+                                {PHONE_CONTACTS.map(c => {
+                                    const isLocked = c.req && !calledContacts.includes(c.req);
+                                    const canAfford = mainPlayer.energy >= c.cost;
+                                    return (
+                                        <button
+                                            key={c.id}
+                                            onClick={() => handlePhoneCall(c.id)}
+                                            disabled={isLocked || !canAfford}
+                                            className={`w-full flex items-center gap-3 p-2 rounded-lg transition text-left border
+                                        ${isLocked ? 'bg-slate-950 border-slate-800 opacity-50 cursor-not-allowed' :
+                                                    !canAfford ? 'bg-slate-800 border-red-900/30 opacity-70 cursor-not-allowed' :
+                                                        'bg-slate-800 border-slate-700 hover:bg-slate-700 hover:border-emerald-500 cursor-pointer'}
+                                    `}
+                                        >
+                                            <div className="text-xl w-8 text-center">{c.icon === 'grad' ? '🎓' : c.icon === 'school' ? '🏫' : '❤️'}</div>
+                                            <div className="flex-1">
+                                                <div className="font-bold text-xs flex justify-between">
+                                                    {c.name}
+                                                    <span className={canAfford ? 'text-emerald-400' : 'text-red-400'}>{c.cost} EN</span>
+                                                </div>
+                                                <div className="text-[9px] text-gray-400 leading-tight">{c.desc}</div>
+                                            </div>
+                                            {isLocked && <Lock size={12} className="text-gray-600" />}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

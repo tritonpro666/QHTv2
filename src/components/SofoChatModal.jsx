@@ -39,7 +39,9 @@ export default function SofoChatModal({ isOpen, onClose }) {
 
         try {
             // Map messages for the AI (excluding the latest one since it's already sent as 'message')
+            // Map messages for the AI (excluding the latest one and the greeting)
             const history = messages
+                .filter(m => m.id !== 0) // Skip the INITIAL_MESSAGE (greeting)
                 .slice(-10) // Take last 10
                 .map(m => ({
                     role: m.sender === 'user' ? 'user' : 'model',

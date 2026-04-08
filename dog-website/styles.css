@@ -1,0 +1,141 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: linear-gradient(180deg, #f9fbff 0%, #edf3ff 100%);
+  color: #1f2937;
+}
+
+.page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+}
+
+h1 {
+  margin: 0;
+  text-align: center;
+  font-size: 2rem;
+}
+
+.subtitle {
+  margin: 0.5rem 0 1.5rem;
+  text-align: center;
+}
+
+.carousel {
+  position: relative;
+  width: min(700px, 95vw);
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+  padding: 1.2rem 3.2rem;
+  overflow: hidden;
+}
+
+.slide {
+  display: none;
+  opacity: 0;
+  transform: translateX(20px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.slide.active {
+  display: block;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.dog-image {
+  width: 100%;
+  height: 380px;
+  object-fit: cover;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: transform 0.25s ease;
+}
+
+.dog-image:hover {
+  transform: scale(1.01);
+}
+
+.dog-info {
+  margin-top: 0.85rem;
+  padding: 0.8rem 1rem;
+  border-radius: 10px;
+  background: #f1f5ff;
+  display: none;
+}
+
+.slide.show-info .dog-info {
+  display: block;
+}
+
+.dog-info h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.dog-info p {
+  margin: 0.28rem 0;
+}
+
+.nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  font-size: 1.2rem;
+  cursor: pointer;
+  background: #2563eb;
+  color: #fff;
+}
+
+.nav-btn:hover {
+  background: #1d4ed8;
+}
+
+.prev {
+  left: 0.6rem;
+}
+
+.next {
+  right: 0.6rem;
+}
+
+.dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: none;
+  background: #c7d2fe;
+  cursor: pointer;
+}
+
+.dot.active {
+  background: #2563eb;
+}
+
+@media (max-width: 640px) {
+  .carousel {
+    padding: 1rem 2.7rem;
+  }
+
+  .dog-image {
+    height: 270px;
+  }
+}

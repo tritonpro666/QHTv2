@@ -1,6 +1,12 @@
 class SofoAIService {
     async sendMessage(userMessage, userContext, history = []) {
         try {
+            console.log("[Sofo AI] Enviando mensaje:", { 
+                message: userMessage, 
+                historyLength: history.length,
+                user: userContext?.email 
+            });
+
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
@@ -29,6 +35,8 @@ class SofoAIService {
                     }
                 }
 
+                console.error("[Sofo AI] Error de respuesta:", { status: response.status, message: errorMsg });
+
                 return {
                     isCritical: false,
                     isQuotaError: response.status === 429,
@@ -36,7 +44,9 @@ class SofoAIService {
                 };
             }
 
-            return await response.json();
+            const data = await response.json();
+            console.log("[Sofo AI] Respuesta recibida:", data);
+            return data;
         } catch (error) {
             console.error("[Sofo AI] Error al comunicarse con el backend:", error);
             return {

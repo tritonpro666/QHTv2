@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Lock, Mail, ArrowRight, Chrome, AlertCircle, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -6,7 +6,17 @@ import { useGameStore } from '../store/gameStore';
 
 export default function Login() {
     const navigate = useNavigate();
-    const { login, register, loginWithGoogle, users, rememberedEmails, removeRememberedAccount, authError } = useGameStore();
+    const { 
+        login, 
+        register, 
+        loginWithGoogle, 
+        users, 
+        rememberedEmails, 
+        removeRememberedAccount, 
+        authError,
+        isAuthenticated,
+        isLoading
+    } = useGameStore();
 
     const [isRegistering, setIsRegistering] = useState(false);
     const [email, setEmail] = useState('');
@@ -16,12 +26,13 @@ export default function Login() {
     const [showGoogleModal, setShowGoogleModal] = useState(false);
     const [googleEmail, setGoogleEmail] = useState('');
 
-    // Mirror store error to local error state
-    React.useEffect(() => {
-        if (authError) setError(authError);
-    }, [authError]);
+    useEffect(() => {
+        if (isAuthenticated) {
+            navigate('/menu');
+        }
+    }, [isAuthenticated, navigate]);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
 
@@ -35,32 +46,11 @@ export default function Login() {
                 setError('Por favor ingresa tu nombre');
                 return;
             }
-            // Register Logic
-            const result = register(email, password, name);
-            // We need to check if registration failed (duplicate email). 
-            // Zustand actions return state, but our store logic returns "new state" or ignores.
-            // A better way is to check if it succeeded.
-            // For this sync implementation, let's just attempt login immediately after.
-            // ACTUALLY our store logic returns state. If users[email] existed, it returned state unchanged.
-            // We can check store state here. But simpler: try to login. If it fails, registration failed.
-
-            // Wait, our register action sets `isAuthenticated: true` if successful.
-            // Let's rely on that. check `useGameStore.getState().isAuthenticated`.
+            await register(email, password, name);
         } else {
-            // Login Logic
-            login(email, password);
+            await login(email, password);
         }
     };
-
-    // Check auth status effect
-    React.useEffect(() => {
-        const unsub = useGameStore.subscribe((state) => {
-            if (state.isAuthenticated) {
-                navigate('/menu');
-            }
-        });
-        return unsub;
-    }, [navigate]);
 
     const handleGoogleLogin = () => {
         if (googleEmail) {
@@ -128,6 +118,7 @@ export default function Login() {
                                 placeholder="Correo electrónico"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
+                                autoComplete="off"
                                 className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:ring-2 focus:ring-sofofa-blue/50 transition-all"
                             />
                         </div>
@@ -141,6 +132,7 @@ export default function Login() {
                                 placeholder="Contraseña"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
+                                autoComplete="new-password"
                                 className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 pl-10 pr-4 outline-none focus:ring-2 focus:ring-sofofa-blue/50 transition-all"
                             />
                         </div>
