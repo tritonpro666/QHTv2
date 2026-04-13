@@ -5,6 +5,7 @@ import { COEXISTENCE_CASES, ARGUMENT_CARDS } from '../data/coexistenceDecks';
 import { Trophy, AlertCircle, Heart, Shield, Plus, Star, Sparkles, Skull } from 'lucide-react';
 import { SHOP_ITEMS } from '../data/gameData';
 import CutIn from './CutIn';
+import InspectorEvent from './InspectorEvent';
 
 const TYPE_ICONS = {
     'RESPECT': <Shield size={24} className="text-blue-500" />,
@@ -32,6 +33,8 @@ export default function CoexistenceTable({ onComplete }) {
     const [feedback, setFeedback] = useState("");
     const [coexistenceLog, setCoexistenceLog] = useState([]);
     const [showCutIn, setShowCutIn] = useState(null);
+    const [showInspectorCutIn, setShowInspectorCutIn] = useState(false);
+    const [isInspectorWatching, setIsInspectorWatching] = useState(false);
 
     const addLog = (msg) => setCoexistenceLog(prev => [msg, ...prev].slice(0, 5));
 
@@ -53,29 +56,40 @@ export default function CoexistenceTable({ onComplete }) {
         setPlayerHand(hand);
         setTableCards([]);
         setScore(0);
+        setIsInspectorWatching(Math.random() < 0.35); // 35% chance
 
         setTimeout(() => setPhase('QHT_REACTION'), 1500);
     }, []);
 
     useEffect(() => {
-        if (network.rumorLevel >= 100 && phase === 'PLAY') {
-            setPhase('RESULT');
-            setFeedback("¡FUNA TOTAL!");
-            addLog("🔴 ¡FUNA TOTAL MÁXIMA! Rumor fuera de control.");
-            addLog("❌ -50% HP a TODOS y Rumor vuelve a 0.");
-            network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.max(1, p.hp - (p.maxHp*0.5)) }));
-            updateRumor(-100);
+        if (network.rumorLevel >= 100 && phase === 'PLAY' && !showInspectorCutIn) {
+            updateRumor(-100); // Disminuir inmediatamente para evitar loops
+            setShowInspectorCutIn(true);
         }
-    }, [network.rumorLevel, phase]);
+    }, [network.rumorLevel, phase, showInspectorCutIn, updateRumor]);
+
+    const handleInspectorComplete = () => {
+        setShowInspectorCutIn(false);
+        addLog("🔴 ¡INSPECTORÍA! Castigo disciplinario aplicado.");
+        addLog("❌ -50% HP a TODOS y Rumor vuelve a 0.");
+        network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.max(1, p.hp - (p.maxHp*0.5)) }));
+    };
 
     const handleInitialReaction = (option) => {
         if (phase !== 'QHT_REACTION') return;
         const impact = option.impact || 0;
+        let finalImpact = impact;
         setScore(prev => prev + impact);
-        addLog(impact >= 0 ? `✨ Decisión inicial positiva (+${impact} pts)` : `⚠️ Alguien dijo algo polémico (${impact} pts)`);
         
-        if (impact < 0) {
-            updateRumor(Math.abs(impact));
+        if (impact < 0 && isInspectorWatching) {
+            finalImpact = impact * 2;
+            addLog("👁️ ¡El Inspector te vio hablando de más! Castigo x2.");
+        } else {
+            addLog(impact >= 0 ? `✨ Decisión inicial positiva (+${impact} pts)` : `⚠️ Alguien dijo algo polémico (${impact} pts)`);
+        }
+
+        if (finalImpact < 0) {
+            updateRumor(Math.abs(finalImpact));
         }
 
         setPhase('PLAY');
@@ -125,15 +139,17 @@ export default function CoexistenceTable({ onComplete }) {
 
         setScore(totalScore);
 
+        const mult = isInspectorWatching ? 2 : 1;
+
         if (matches >= 3 && totalScore >= 50) {
             setFeedback("¡AMBIENTE BAKÁN!");
             addLog("✨ ¡Ambiente Bakán! Todos recuperan 100% HP y Energía.");
             addLog("🎁 Equipo recibe: Poción de Resurrección");
             addLog("🌟 +150 XP para todos");
-            addLog("📉 El Rumor bajó (-20)");
+            addLog("📉 El Rumor bajó (-10)");
             addLog("🤝 Vínculo de Equipo +5");
             addXp(150);
-            updateRumor(-20);
+            updateRumor(-10);
             network.players.slice(1).forEach(p => increaseBond(0, p.id, 5));
             addToSessionInventory(SHOP_ITEMS.find(i => i.id === 'pot_revive'));
             network.players.forEach(p => updatePlayerCombat(p.id, { hp: p.maxHp, energy: p.maxEnergy }));
@@ -143,10 +159,10 @@ export default function CoexistenceTable({ onComplete }) {
             addLog("👍 Pulento. Recuperan 50% HP y Energía.");
             addLog("🎁 Equipo recibe: Colación Completa");
             addLog("🌟 +80 XP para todos");
-            addLog("📉 El Rumor bajó (-10)");
+            addLog("📉 El Rumor bajó (-5)");
             addLog("🤝 Vínculo de Equipo +2");
             addXp(80);
-            updateRumor(-10);
+            updateRumor(-5);
             network.players.slice(1).forEach(p => increaseBond(0, p.id, 2));
             addToSessionInventory(SHOP_ITEMS.find(i => i.id === 'pot_mix_1'));
             network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.min(p.maxHp, p.hp + (p.maxHp*0.5)), energy: Math.min(p.maxEnergy, p.energy + (p.maxEnergy*0.5)) }));
@@ -154,17 +170,18 @@ export default function CoexistenceTable({ onComplete }) {
             setFeedback("AMBIENTE PIOLA");
             addLog("👌 Piola. Recuperan 20% HP.");
             addLog("🎁 Equipo recibe: Leche de Recreo");
+            addLog(`📈 Aumenta el Rumor Escolar (+${10 * mult})`);
             addLog("🌟 +30 XP para todos");
             addXp(30);
-            updateRumor(5);
+            updateRumor(10 * mult);
             addToSessionInventory(SHOP_ITEMS.find(i => i.id === 'pot_hp_1'));
             network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.min(p.maxHp, p.hp + (p.maxHp*0.2)), energy: Math.min(p.maxEnergy, p.energy + (p.maxEnergy*0.2)) }));
         } else {
             setFeedback("AMBIENTE PENCA");
             addLog("💀 Ambiente Penca. Todos se estresan.");
             addLog("❌ -20% HP Máximo a todos");
-            addLog("📈 Aumenta el Rumor Escolar MASIVAMENTE (+35)");
-            updateRumor(35);
+            addLog(`📈 Aumenta el Rumor Escolar MASIVAMENTE (+${40 * mult})`);
+            updateRumor(40 * mult);
             network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.max(1, p.hp - (p.maxHp*0.2)) }));
         }
 
@@ -193,12 +210,27 @@ export default function CoexistenceTable({ onComplete }) {
                     <div className="text-[10px] font-black uppercase text-red-400 mb-1 tracking-widest bg-black/50 w-fit px-2 rounded backdrop-blur-md">🔥 Nivel de Rumor</div>
                     <div className="w-full h-3 bg-stone-800 border-2 border-stone-700 rounded-full overflow-hidden shadow-2xl relative">
                         <motion.div 
-                            className="h-full bg-gradient-to-r from-red-600 to-red-400"
+                            className={`h-full bg-gradient-to-r from-red-600 to-red-400 ${isInspectorWatching ? 'animate-pulse' : ''}`}
                             initial={{ width: 0 }}
                             animate={{ width: `${Math.min(100, network.rumorLevel || 0)}%` }}
                         />
                     </div>
                 </div>
+
+                <AnimatePresence>
+                    {isInspectorWatching && (
+                        <motion.div 
+                            initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }}
+                            className="bg-red-950/80 border-2 border-red-500 px-4 py-2 rounded-xl flex items-center gap-2 shadow-[0_0_15px_rgba(255,0,0,0.5)] backdrop-blur-md"
+                        >
+                            <img src="/inspector_avatar.png" className="w-8 h-8 rounded-full border border-red-300 object-cover" />
+                            <div className="text-right">
+                                <p className="text-white font-black text-xs uppercase">Vigilancia</p>
+                                <p className="text-red-300 text-[9px] uppercase tracking-wider">Castigos de Rumor x2</p>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
 
             {/* THE POKER TABLE (Beautiful Green Felt with Wood Edge) */}
@@ -402,6 +434,7 @@ export default function CoexistenceTable({ onComplete }) {
             </AnimatePresence>
 
             <CutIn player={showCutIn} onComplete={() => setShowCutIn(null)} />
+            <InspectorEvent isActive={showInspectorCutIn} onComplete={handleInspectorComplete} />
         </div>
     );
 }

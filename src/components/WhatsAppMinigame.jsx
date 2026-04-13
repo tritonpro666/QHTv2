@@ -5,6 +5,7 @@ import { COEXISTENCE_CASES } from '../data/coexistenceDecks';
 import { Trophy, AlertCircle, Heart, Shield, Plus, Star, MessageSquareX, PhoneOff, Users, Clock, Skull } from 'lucide-react';
 import { SHOP_ITEMS } from '../data/gameData';
 import CutIn from './CutIn';
+import InspectorEvent from './InspectorEvent';
 
 const MSG_TEXTS = [
     "¡Eres lo peor!", "Nadie te soporta", "Jaja qué perdedor", 
@@ -29,6 +30,8 @@ export default function WhatsAppMinigame({ onComplete }) {
     const [feedback, setFeedback] = useState("");
     const [coexistenceLog, setCoexistenceLog] = useState([]);
     const [showCutIn, setShowCutIn] = useState(null);
+    const [showInspectorCutIn, setShowInspectorCutIn] = useState(false);
+    const [isInspectorWatching, setIsInspectorWatching] = useState(false);
     const [showInspector, setShowInspector] = useState(false);
     const [inspectorPunishment, setInspectorPunishment] = useState(null);
     const [timeLeft, setTimeLeft] = useState(20);
@@ -80,19 +83,15 @@ export default function WhatsAppMinigame({ onComplete }) {
     useEffect(() => {
         const randomCase = COEXISTENCE_CASES[Math.floor(Math.random() * COEXISTENCE_CASES.length)];
         setCurrentCase(randomCase);
+        setIsInspectorWatching(Math.random() < 0.4); // 40% chance of being watched
         setPhase('INTRO');
     }, []);
 
     // Phase Manager
     useEffect(() => {
-        if (network.rumorLevel >= 100 && phase === 'PLAYING') {
-            setPhase('RESULT');
-            setFeedback("¡FUNA TOTAL!");
-            addLog("🔴 ¡FUNA TOTAL MÁXIMA! El liceo escolar los odia.");
-            addLog("❌ -50% HP a TODOS y Rumor vuelve a 0.");
-            network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.max(1, p.hp - (p.maxHp*0.5)) }));
-            updateRumor(-100);
-            setTimeout(() => applyInspectorRoulette(), 1500);
+        if (network.rumorLevel >= 100 && phase === 'PLAYING' && !showInspectorCutIn) {
+            updateRumor(-100); // Disminuir inmediatamente para evitar loops
+            setShowInspectorCutIn(true);
             return;
         }
 
@@ -104,7 +103,7 @@ export default function WhatsAppMinigame({ onComplete }) {
             } else {
                 setPhase('PLAYING');
             }
-        } else if (phase === 'PLAYING') {
+        } else if (phase === 'PLAYING' && !showInspectorCutIn) {
             // Global Play Timer
             const timer = setInterval(() => {
                 setTimeLeft(t => {
@@ -120,11 +119,11 @@ export default function WhatsAppMinigame({ onComplete }) {
         } else if (phase === 'EVALUATE') {
             evaluateHand();
         }
-    }, [phase, countdown]);
+    }, [phase, countdown, network.rumorLevel, showInspectorCutIn, updateRumor]);
 
     // Game Loop
     useEffect(() => {
-        if (phase !== 'PLAYING') return;
+        if (phase !== 'PLAYING' || showInspectorCutIn) return;
 
         // Spawner
         const spawnInterval = setInterval(() => {
@@ -167,7 +166,8 @@ export default function WhatsAppMinigame({ onComplete }) {
                     } else {
                         missedAny = true;
                         setMisses(m => m + 1);
-                        updateRumor(4); // Instantly increase rumor
+                        const mult = isInspectorWatching ? 2 : 1;
+                        updateRumor(5 * mult); // Instantly increase rumor
                     }
                 } else {
                     activeBubbles.push(b);
@@ -196,7 +196,7 @@ export default function WhatsAppMinigame({ onComplete }) {
         }, 50);
 
         return () => { clearInterval(spawnInterval); clearInterval(physicsInterval); };
-    }, [phase, currentCase]);
+    }, [phase, currentCase, showInspectorCutIn, isInspectorWatching, updateRumor]);
 
     const handleReactionClick = (type) => {
         if (phase !== 'PLAYING') return;
@@ -213,8 +213,9 @@ export default function WhatsAppMinigame({ onComplete }) {
 
         if (target.isTroll) {
             setMisses(m => m + 1);
-            updateRumor(15);
-            addLog(`💀 ¡Caíste en el Bait! El rumor sube (+15).`);
+            const mult = isInspectorWatching ? 2 : 1;
+            updateRumor(20 * mult);
+            addLog(`💀 ¡Caíste en el Bait! El rumor sube (+${20 * mult}).`);
             addHitText(target.x, target.y, "¡BAIT!", "text-red-500");
             resetCombo();
         } else if (target.type === type) {
@@ -236,8 +237,9 @@ export default function WhatsAppMinigame({ onComplete }) {
         } else {
             // MISS PENALTY (Wrong reaction)
             setMisses(m => m + 1);
-            updateRumor(8);
-            addLog(`❌ Reacción equivocada. El rumor sube (+8).`);
+            const mult = isInspectorWatching ? 2 : 1;
+            updateRumor(10 * mult);
+            addLog(`❌ Reacción equivocada. El rumor sube (+${10 * mult}).`);
             addHitText(target.x, target.y, "¡Miss!", "text-red-500");
             resetCombo();
         }
@@ -268,16 +270,17 @@ export default function WhatsAppMinigame({ onComplete }) {
 
     const evaluateHand = () => {
         const total = score;
+        const mult = isInspectorWatching ? 2 : 1;
         
         if (total >= 14) {
             setFeedback("¡AMBIENTE BAKÁN!");
             addLog("✨ ¡Chat dominado! Todos recuperan 100% HP y Energía.");
             addLog("🎁 Equipo recibe: Poción de Resurrección");
             addLog("🌟 +150 XP para todos");
-            addLog("📉 El Rumor bajó (-20)");
+            addLog("📉 El Rumor bajó (-10)");
             addLog("🤝 Vínculo de Equipo +5");
             addXp(150);
-            updateRumor(-20);
+            updateRumor(-10);
             network.players.slice(1).forEach(p => increaseBond(0, p.id, 5));
             addToSessionInventory(SHOP_ITEMS.find(i => i.id === 'pot_revive'));
             network.players.forEach(p => updatePlayerCombat(p.id, { hp: p.maxHp, energy: p.maxEnergy }));
@@ -287,10 +290,10 @@ export default function WhatsAppMinigame({ onComplete }) {
             addLog("👍 Pulento. Filtraron casi todo. Recuperan 50% HP.");
             addLog("🎁 Equipo recibe: Colación Completa");
             addLog("🌟 +80 XP para todos");
-            addLog("📉 El Rumor bajó (-10)");
+            addLog("📉 El Rumor bajó (-5)");
             addLog("🤝 Vínculo de Equipo +2");
             addXp(80);
-            updateRumor(-10);
+            updateRumor(-5);
             network.players.slice(1).forEach(p => increaseBond(0, p.id, 2));
             addToSessionInventory(SHOP_ITEMS.find(i => i.id === 'pot_mix_1'));
             network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.min(p.maxHp, p.hp + (p.maxHp*0.5)), energy: Math.min(p.maxEnergy, p.energy + (p.maxEnergy*0.5)) }));
@@ -306,13 +309,20 @@ export default function WhatsAppMinigame({ onComplete }) {
             setFeedback("AMBIENTE PENCA");
             addLog("💀 ¡Funa Total! El estrés daña al equipo.");
             addLog("❌ -20% HP Máximo a todos");
-            addLog("📈 Aumenta el Rumor Escolar MASIVAMENTE (+35)");
-            updateRumor(35);
+            addLog(`📈 Aumenta el Rumor Escolar MASIVAMENTE (+${40 * mult})`);
+            updateRumor(40 * mult);
             network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.max(1, p.hp - (p.maxHp*0.2)) }));
             setTimeout(() => applyInspectorRoulette(), 1500);
         }
 
         setPhase('RESULT');
+    };
+
+    const handleInspectorComplete = () => {
+        setShowInspectorCutIn(false);
+        addLog("🔴 ¡INSPECTORÍA! Castigo disciplinario por uso de celular en clase.");
+        addLog("❌ -50% HP a TODOS y Rumor vuelve a 0.");
+        network.players.forEach(p => updatePlayerCombat(p.id, { hp: Math.max(1, p.hp - (p.maxHp*0.5)) }));
     };
 
     const handleStolenPhone = () => {
@@ -367,6 +377,21 @@ export default function WhatsAppMinigame({ onComplete }) {
                     )}
                 </div>
             </div>
+
+            <AnimatePresence>
+                {isInspectorWatching && (
+                    <motion.div 
+                        initial={{ x: 100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 100, opacity: 0 }}
+                        className="absolute right-8 top-24 z-20 bg-red-950/80 border-2 border-red-500 px-4 py-2 rounded-xl flex items-center gap-2 shadow-[0_0_15px_rgba(255,0,0,0.5)] backdrop-blur-md"
+                    >
+                        <img src="/inspector_avatar.png" className="w-8 h-8 rounded-full border border-red-300 object-cover" />
+                        <div className="text-right">
+                            <p className="text-white font-black text-xs uppercase">Vigilancia</p>
+                            <p className="text-red-300 text-[9px] uppercase tracking-wider">Castigos de Rumor x2</p>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* MAIN PHONE UI CONATINER */}
             <motion.div 
@@ -546,6 +571,7 @@ export default function WhatsAppMinigame({ onComplete }) {
             </div>
 
             <CutIn player={showCutIn} onComplete={() => setShowCutIn(null)} />
+            <InspectorEvent isActive={showInspectorCutIn} onComplete={handleInspectorComplete} />
         </div>
     );
 }
